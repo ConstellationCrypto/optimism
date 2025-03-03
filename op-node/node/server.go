@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 
-	ophttp "github.com/ethereum-optimism/optimism/op-service/httputil"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -15,7 +14,9 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/metrics"
 	"github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
-	"github.com/ethereum-optimism/optimism/op-service/sources"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/engine"
+	"github.com/ethereum-optimism/optimism/op-service/apis"
+	ophttp "github.com/ethereum-optimism/optimism/op-service/httputil"
 )
 
 type rpcServer struct {
@@ -24,7 +25,7 @@ type rpcServer struct {
 	httpServer *ophttp.HTTPServer
 	appVersion string
 	log        log.Logger
-	sources.L2Client
+	m          metrics.Metricer
 }
 
 func newRPCServer(rpcCfg *RPCConfig, rollupCfg *rollup.Config, l2Client l2EthClient, dr driverClient, safedb SafeDBReader, log log.Logger, appVersion string, m metrics.Metricer) (*rpcServer, error) {
@@ -59,6 +60,13 @@ func (s *rpcServer) EnableP2P(backend *p2p.APIBackend) {
 		Version:       "",
 		Service:       backend,
 		Authenticated: false,
+	})
+}
+
+func (s *rpcServer) EnableOpstackAPI(eng engine.RollupAPI, publisher apis.PublishAPI) {
+	s.apis = append(s.apis, rpc.API{
+		Namespace: "opstack",
+		Service:   NewOpstackAPI(eng, publisher, s.m),
 	})
 }
 

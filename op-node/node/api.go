@@ -11,11 +11,13 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-node/node/safedb"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/engine"
 	"github.com/ethereum-optimism/optimism/op-node/version"
 	"github.com/ethereum-optimism/optimism/op-service/apis"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/rpc"
+	opsigner "github.com/ethereum-optimism/optimism/op-service/signer"
 )
 
 type l2EthClient interface {
@@ -192,4 +194,48 @@ func (n *nodeAPI) Version(ctx context.Context) (string, error) {
 	recordDur := n.m.RecordRPCServerRequest("optimism_version")
 	defer recordDur()
 	return version.Version + "-" + version.Meta, nil
+}
+
+type opstackAPI struct {
+	engine    engine.RollupAPI
+	publisher apis.PublishAPI
+	m         metrics.RPCMetricer
+}
+
+func NewOpstackAPI(eng engine.RollupAPI, publisher apis.PublishAPI, m metrics.RPCMetricer) *opstackAPI {
+	return &opstackAPI{
+		engine:    eng,
+		publisher: publisher,
+		m:         m,
+	}
+}
+
+func (a *opstackAPI) OpenBlockV1(ctx context.Context, parent eth.BlockID, attrs *eth.PayloadAttributes) (eth.PayloadInfo, error) {
+	recordDur := a.m.RecordRPCServerRequest("opstack_openBlockV1")
+	defer recordDur()
+	return a.engine.OpenBlock(ctx, parent, attrs)
+}
+
+func (a *opstackAPI) CancelBlockV1(ctx context.Context, id eth.PayloadInfo) error {
+	recordDur := a.m.RecordRPCServerRequest("opstack_cancelBlockV1")
+	defer recordDur()
+	return a.engine.CancelBlock(ctx, id)
+}
+
+func (a *opstackAPI) SealBlockV1(ctx context.Context, id eth.PayloadInfo) (*eth.ExecutionPayloadEnvelope, error) {
+	recordDur := a.m.RecordRPCServerRequest("opstack_sealBlockV1")
+	defer recordDur()
+	return a.engine.SealBlock(ctx, id)
+}
+
+func (a *opstackAPI) CommitBlockV1(ctx context.Context, envelope *opsigner.SignedExecutionPayloadEnvelope) error {
+	recordDur := a.m.RecordRPCServerRequest("opstack_commitBlockV1")
+	defer recordDur()
+	return a.engine.CommitBlock(ctx, envelope)
+}
+
+func (a *opstackAPI) PublishBlockV1(ctx context.Context, signed *opsigner.SignedExecutionPayloadEnvelope) error {
+	recordDur := a.m.RecordRPCServerRequest("opstack_publishBlockV1")
+	defer recordDur()
+	return a.publisher.PublishBlock(ctx, signed)
 }
