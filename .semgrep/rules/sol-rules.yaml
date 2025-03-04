@@ -123,7 +123,7 @@ rules:
         - packages/contracts-bedrock/interfaces
         - packages/contracts-bedrock/scripts/libraries/Solarray.sol
         - packages/contracts-bedrock/src/universal/WETH98.sol
-        - packages/contracts-bedrock/src/L2/SuperchainWETH.sol
+        - packages/contracts-bedrock/src/L2/SuperchainETHBridge.sol
         - packages/contracts-bedrock/src/governance/GovernanceToken.sol
 
   - id: sol-style-return-arg-fmt

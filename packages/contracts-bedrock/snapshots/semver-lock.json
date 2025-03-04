@@ -60,8 +60,8 @@
     "sourceCodeHash": "0x661d7659f09b7f909e8bd5e6c41e8c98f2091036ed2123b7e18a1a74120bd849"
   },
   "src/L2/ETHLiquidity.sol": {
-    "initCodeHash": "0x776ece4a1bb24d97287806769470327641da240b083898a90943e2844957cc46",
-    "sourceCodeHash": "0xe5c08ce62327113e4bbaf29f47e5f1ddfad6fbd63c07132eedfba5af5325f331"
+    "initCodeHash": "0xfcb50f32bbbd7e426f83c5c320ea655b896c026324a5e51983c1b15041ef88ca",
+    "sourceCodeHash": "0xfee0f1ad09c975787b754fb4bc9128f43ed8ba3090d3bdc19cc73429237dd40a"
   },
   "src/L2/GasPriceOracle.sol": {
     "initCodeHash": "0x83d50e3b34cd1b4de32f1cced28796b07aefc526cc17ceb1903ad55f4abc90b7",
@@ -131,13 +131,13 @@
     "initCodeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
     "sourceCodeHash": "0x981dca5b09da9038a9dff071b40a880e1b52b20268c6780ef54be3bc98a4f629"
   },
+  "src/L2/SuperchainETHBridge.sol": {
+    "initCodeHash": "0x307a2d2eef591a5a43aa75e0f04982fdfb427433bc6e46c7602020287d4cd610",
+    "sourceCodeHash": "0x51b7d5b320919819167cfbacecf970405881d4190dedd0da95a99a031c256174"
+  },
   "src/L2/SuperchainTokenBridge.sol": {
     "initCodeHash": "0x6b568ed564aede82a3a4cbcdb51282cad0e588a3fe6d91cf76616d3113df3901",
     "sourceCodeHash": "0xcd2b49cb7cf6d18616ee8bec9183fe5b5b460941875bc0b4158c4d5390ec3b0c"
-  },
-  "src/L2/SuperchainWETH.sol": {
-    "initCodeHash": "0x545686820e440d72529c815b7406844272d5ec33b741b2be6ebbe3a3db1ca8ad",
-    "sourceCodeHash": "0x6145e61cc0a0c95db882a76ecffea15c358c2b574d5157e53b85a69908701613"
   },
   "src/L2/WETH.sol": {
     "initCodeHash": "0x38b396fc35d72e8013bad2fe8d7dea5285499406d4c4b62e27c54252e1e0f00a",
