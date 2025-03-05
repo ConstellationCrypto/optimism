@@ -110,10 +110,9 @@ func (r *InteropDevRecipe) hydrated() InteropDevRecipe {
 		GenesisTimestamp: r.GenesisTimestamp,
 	}
 	for i, l := range r.L2s {
+		out.L2s[i] = l
 		if l.BlockTime == 0 {
 			out.L2s[i].BlockTime = defaultBlockTime
-		} else {
-			out.L2s[i].BlockTime = l.BlockTime
 		}
 	}
 	return out
