@@ -769,6 +769,236 @@ func TestInteropFaultProofsInvalidBlock(gt *testing.T) {
 	runFppAndChallengerTests(gt, system, tests)
 }
 
+func TestInteropFaultProofs_DifferentBlockTimes(gt *testing.T) {
+	t := helpers.NewDefaultTesting(gt)
+	system := dsl.NewInteropDSL(t, dsl.SetBlockTimeForChainA(1), dsl.SetBlockTimeForChainB(2))
+
+	system.AddL2Block(system.Actors.ChainA)
+	system.AddL2Block(system.Actors.ChainB)
+
+	// Submit batch data for each chain in separate L1 blocks so tests can have one chain safe and one unsafe
+	system.SubmitBatchData(func(opts *dsl.SubmitBatchDataOpts) {
+		opts.SetChains(system.Actors.ChainA)
+	})
+	system.SubmitBatchData(func(opts *dsl.SubmitBatchDataOpts) {
+		opts.SetChains(system.Actors.ChainB)
+	})
+
+	actors := system.Actors
+
+	endTimestamp := actors.ChainA.RollupCfg.Genesis.L2Time + actors.ChainA.RollupCfg.BlockTime
+	startTimestamp := endTimestamp - 1
+
+	start := system.Outputs.SuperRoot(startTimestamp)
+	end := system.Outputs.SuperRoot(endTimestamp)
+
+	step1Expected := system.Outputs.TransitionState(startTimestamp, 1,
+		system.Outputs.OptimisticBlockAtTimestamp(actors.ChainA, endTimestamp),
+	).Marshal()
+
+	step2Expected := system.Outputs.TransitionState(startTimestamp, 2,
+		system.Outputs.OptimisticBlockAtTimestamp(actors.ChainA, endTimestamp),
+		system.Outputs.OptimisticBlockAtTimestamp(actors.ChainB, endTimestamp),
+	).Marshal()
+
+	paddingStep := func(step uint64) []byte {
+		return system.Outputs.TransitionState(startTimestamp, step,
+			system.Outputs.OptimisticBlockAtTimestamp(actors.ChainA, endTimestamp),
+			system.Outputs.OptimisticBlockAtTimestamp(actors.ChainB, endTimestamp),
+		).Marshal()
+	}
+
+	tests := []*transitionTest{
+		{
+			name:               "ClaimDirectToNextTimestamp",
+			agreedClaim:        start.Marshal(),
+			disputedClaim:      end.Marshal(),
+			disputedTraceIndex: 0,
+			expectValid:        false,
+		},
+		{
+			name:               "FirstChainOptimisticBlock",
+			agreedClaim:        start.Marshal(),
+			disputedClaim:      step1Expected,
+			disputedTraceIndex: 0,
+			expectValid:        true,
+		},
+		{
+			name:               "FirstChainOptimisticBlock-InvalidNoChange",
+			agreedClaim:        start.Marshal(),
+			disputedClaim:      start.Marshal(),
+			disputedTraceIndex: 0,
+			expectValid:        false,
+		},
+		{
+			name:               "SecondChainOptimisticBlock",
+			agreedClaim:        step1Expected,
+			disputedClaim:      step2Expected,
+			disputedTraceIndex: 1,
+			expectValid:        true,
+		},
+		{
+			name:               "SecondChainOptimisticBlock-InvalidNoChange",
+			agreedClaim:        step1Expected,
+			disputedClaim:      step1Expected,
+			disputedTraceIndex: 1,
+			expectValid:        false,
+		},
+		{
+			name:               "FirstPaddingStep",
+			agreedClaim:        step2Expected,
+			disputedClaim:      paddingStep(3),
+			disputedTraceIndex: 2,
+			expectValid:        true,
+		},
+		{
+			name:               "FirstPaddingStep-InvalidNoChange",
+			agreedClaim:        step2Expected,
+			disputedClaim:      step2Expected,
+			disputedTraceIndex: 2,
+			expectValid:        false,
+		},
+		{
+			name:               "SecondPaddingStep",
+			agreedClaim:        paddingStep(3),
+			disputedClaim:      paddingStep(4),
+			disputedTraceIndex: 3,
+			expectValid:        true,
+		},
+		{
+			name:               "SecondPaddingStep-InvalidNoChange",
+			agreedClaim:        paddingStep(3),
+			disputedClaim:      paddingStep(3),
+			disputedTraceIndex: 3,
+			expectValid:        false,
+		},
+		{
+			name:               "LastPaddingStep",
+			agreedClaim:        paddingStep(consolidateStep - 1),
+			disputedClaim:      paddingStep(consolidateStep),
+			disputedTraceIndex: consolidateStep - 1,
+			expectValid:        true,
+		},
+		{
+			// The proposed block timestamp is after the unsafe head block timestamp.
+			// Expect to transition to invalid because the unsafe head is reached but challenger needs to handle
+			// not having any data at the next timestamp because the chain doesn't extend that far.
+			name:        "DisputeTimestampAfterChainHeadChainA",
+			agreedClaim: end.Marshal(),
+			// With 2 second block times, we haven't yet reached the next block on the first chain so it's still valid
+			disputedClaim: system.Outputs.TransitionState(endTimestamp, 1,
+				system.Outputs.OptimisticBlockAtTimestamp(actors.ChainA, endTimestamp+1),
+			).Marshal(),
+			proposalTimestamp:  endTimestamp + 100,
+			disputedTraceIndex: consolidateStep + 1,
+			expectValid:        true,
+		},
+		{
+			// The proposed block timestamp is after the unsafe head block timestamp.
+			// Expect to transition to invalid because the unsafe head is reached but challenger needs to handle
+			// not having any data at the next timestamp because the chain doesn't extend that far.
+			name: "DisputeTimestampAfterChainHeadChainB",
+			agreedClaim: system.Outputs.TransitionState(endTimestamp, 1,
+				system.Outputs.OptimisticBlockAtTimestamp(actors.ChainA, endTimestamp+1),
+			).Marshal(),
+			// With 2 second block times, we haven't yet reached the next block on the second chain so it's still valid
+			disputedClaim: system.Outputs.TransitionState(endTimestamp, 2,
+				system.Outputs.OptimisticBlockAtTimestamp(actors.ChainA, endTimestamp+1),
+				system.Outputs.OptimisticBlockAtTimestamp(actors.ChainB, endTimestamp+1),
+			).Marshal(),
+			proposalTimestamp:  endTimestamp + 100,
+			disputedTraceIndex: consolidateStep + 2,
+			expectValid:        true,
+		},
+		{
+			// The proposed block timestamp is after the unsafe head block timestamp.
+			// Expect to transition to invalid because the unsafe head is reached but challenger needs to handle
+			// not having any data at the next timestamp because the chain doesn't extend that far.
+			name: "DisputeTimestampAfterChainHeadConsolidate",
+			agreedClaim: system.Outputs.TransitionState(endTimestamp, consolidateStep,
+				system.Outputs.OptimisticBlockAtTimestamp(actors.ChainA, endTimestamp+1),
+				system.Outputs.OptimisticBlockAtTimestamp(actors.ChainB, endTimestamp+1),
+			).Marshal(),
+			// With 2 second block times, we haven't yet reached the next block on either chain so it's still valid
+			// It will have an incremented timestamp but the same chain output roots
+			disputedClaim:      system.Outputs.SuperRoot(endTimestamp + 1).Marshal(),
+			proposalTimestamp:  endTimestamp + 100,
+			disputedTraceIndex: 2*stepsPerTimestamp - 1,
+			expectValid:        true,
+		},
+		{
+			// The proposed block timestamp is after the unsafe head block timestamp.
+			// Expect to transition to invalid because the unsafe head is reached but challenger needs to handle
+			// not having any data at the next timestamp because the chain doesn't extend that far.
+			name:        "DisputeBlockAfterChainHead-FirstChain",
+			agreedClaim: system.Outputs.SuperRoot(endTimestamp + 1).Marshal(),
+			// Timestamp has advanced enough to expect the next block now, but it doesn't exit so transition to invalid
+			disputedClaim:      interop.InvalidTransition,
+			proposalTimestamp:  endTimestamp + 100,
+			disputedTraceIndex: 2 * stepsPerTimestamp,
+			expectValid:        true,
+		},
+		{
+			// The agreed and disputed claim are both after the current chain head
+			name:               "AgreedBlockAfterChainHead-Consolidate",
+			agreedClaim:        interop.InvalidTransition,
+			disputedClaim:      interop.InvalidTransition,
+			proposalTimestamp:  endTimestamp + 100,
+			disputedTraceIndex: 4*stepsPerTimestamp - 1,
+			expectValid:        true,
+		},
+		{
+			// The agreed and disputed claim are both after the current chain head and disputing an optimistic block
+			name:               "AgreedBlockAfterChainHead-Optimistic",
+			agreedClaim:        interop.InvalidTransition,
+			disputedClaim:      interop.InvalidTransition,
+			proposalTimestamp:  endTimestamp + 100,
+			disputedTraceIndex: 4*stepsPerTimestamp + 1,
+			expectValid:        true,
+		},
+
+		{
+			name:               "FirstChainReachesL1Head",
+			agreedClaim:        start.Marshal(),
+			disputedClaim:      interop.InvalidTransition,
+			disputedTraceIndex: 0,
+			// The derivation reaches the L1 head before the next block can be created
+			l1Head:      actors.L1Miner.L1Chain().Genesis().Hash(),
+			expectValid: true,
+		},
+		{
+			name:               "SecondChainReachesL1Head",
+			agreedClaim:        step1Expected,
+			disputedClaim:      interop.InvalidTransition,
+			disputedTraceIndex: 1,
+			// The derivation reaches the L1 head before the next block can be created
+			l1Head:      actors.L1Miner.L1Chain().GetCanonicalHash(1),
+			expectValid: true,
+		},
+		{
+			name:               "SuperRootInvalidIfUnsupportedByL1Data",
+			agreedClaim:        start.Marshal(),
+			disputedClaim:      step1Expected,
+			disputedTraceIndex: 0,
+			// The derivation reaches the L1 head before the next block can be created
+			l1Head:      actors.L1Miner.L1Chain().Genesis().Hash(),
+			expectValid: false,
+		},
+		{
+			name:               "FromInvalidTransitionHash",
+			agreedClaim:        interop.InvalidTransition,
+			disputedClaim:      interop.InvalidTransition,
+			disputedTraceIndex: 2,
+			// The derivation reaches the L1 head before the next block can be created
+			l1Head:      actors.L1Miner.L1Chain().Genesis().Hash(),
+			expectValid: true,
+		},
+	}
+
+	runFppAndChallengerTests(gt, system, tests)
+
+}
+
 func runFppAndChallengerTests(gt *testing.T, system *dsl.InteropDSL, tests []*transitionTest) {
 	for _, test := range tests {
 		test := test
