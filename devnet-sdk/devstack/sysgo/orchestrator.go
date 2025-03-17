@@ -33,8 +33,8 @@ type Orchestrator struct {
 	l2CLs       locks.RWMap[stack.L2CLNodeID, *L2CLNode]
 	supervisors locks.RWMap[stack.SupervisorID, *Supervisor]
 	batchers    locks.RWMap[stack.L2BatcherID, *L2Batcher]
-	//challengers locks.RWMap[stack.L2ChallengerID, *L2Challenger] // TODO(#15057): op-challenger support
-	proposers locks.RWMap[stack.L2ProposerID, *L2Proposer]
+	challengers locks.RWMap[stack.L2ChallengerID, *L2Challenger]
+	proposers   locks.RWMap[stack.L2ProposerID, *L2Proposer]
 
 	jwtPath     string
 	jwtSecret   [32]byte
