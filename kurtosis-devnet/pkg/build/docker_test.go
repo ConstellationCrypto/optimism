@@ -35,10 +35,19 @@ func (p *mockDockerProvider) newClient() (dockerClient, error) {
 // mockCmd is a mock for command execution that always succeeds
 type mockCmd struct {
 	output []byte
+	dir    string
 }
 
 func (m *mockCmd) CombinedOutput() ([]byte, error) {
 	return m.output, nil
+}
+
+func (m *mockCmd) Dir() string {
+	return m.dir
+}
+
+func (m *mockCmd) SetDir(dir string) {
+	m.dir = dir
 }
 
 // mockCmdFactory creates mock commands for testing
@@ -50,66 +59,51 @@ func mockCmdFactory(output []byte) cmdFactory {
 
 // TestDockerBuilderNaming tests the image naming logic in the DockerBuilder
 func TestDockerBuilderNaming(t *testing.T) {
-	tests := []struct {
-		name        string
-		projectName string
-		imageTag    string
-		mockInspect types.ImageInspect
-		mockTagErr  error
-		wantTag     string
-		wantErr     bool
-	}{
-		{
-			name:        "successful image build and tag",
-			projectName: "test-project",
-			imageTag:    "test-image:latest",
-			mockInspect: types.ImageInspect{
-				ID: "sha256:abcdef123456789abcdef123456789abcdef1234",
+	t.Run("successful_image_build_and_tag", func(t *testing.T) {
+		mockClient := &mockDockerClient{
+			inspectFunc: func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error) {
+				return types.ImageInspect{
+					ID: "sha256:abcdef123456789abcdef123456789abcdef1234",
+				}, nil, nil
 			},
-			wantTag: "test-project:abcdef123456",
-			wantErr: false,
-		},
-		{
-			name:        "tag error",
-			projectName: "test-project",
-			imageTag:    "test-image:latest",
-			mockInspect: types.ImageInspect{
-				ID: "sha256:abcdef123456789abcdef123456789abcdef1234",
+			tagFunc: func(ctx context.Context, source, target string) error {
+				return nil
 			},
-			mockTagErr: assert.AnError,
-			wantErr:    true,
-		},
-	}
+		}
+		mockProvider := &mockDockerProvider{client: mockClient}
+		mockCmd := mockCmdFactory([]byte("test"))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &mockDockerClient{
-				inspectFunc: func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error) {
-					return tt.mockInspect, nil, nil
-				},
-				tagFunc: func(ctx context.Context, source, target string) error {
-					return tt.mockTagErr
-				},
-			}
+		builder := NewDockerBuilder(
+			withDockerProvider(mockProvider),
+			withCmdFactory(mockCmd),
+		)
 
-			mockProvider := &mockDockerProvider{
-				client: mockClient,
-			}
+		image, err := builder.Build("test-project", "test-image:latest")
+		require.NoError(t, err)
+		assert.Equal(t, "test-project:abcdef123456", image)
+	})
 
-			// Create a builder with our mocks
-			builder := NewDockerBuilder(
-				withDockerProvider(mockProvider),
-				withCmdFactory(mockCmdFactory([]byte("mock build output"))),
-			)
+	t.Run("tag_error", func(t *testing.T) {
+		mockClient := &mockDockerClient{
+			inspectFunc: func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error) {
+				return types.ImageInspect{
+					ID: "sha256:abcdef123456789abcdef123456789abcdef1234",
+				}, nil, nil
+			},
+			tagFunc: func(ctx context.Context, source, target string) error {
+				return assert.AnError
+			},
+		}
+		mockProvider := &mockDockerProvider{client: mockClient}
+		mockCmd := mockCmdFactory([]byte("test"))
 
-			tag, err := builder.Build(tt.projectName, tt.imageTag)
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
+		builder := NewDockerBuilder(
+			withDockerProvider(mockProvider),
+			withCmdFactory(mockCmd),
+		)
 
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantTag, tag)
-		})
-	}
+		_, err := builder.Build("test-project", "test-image:latest")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), assert.AnError.Error())
+	})
 }

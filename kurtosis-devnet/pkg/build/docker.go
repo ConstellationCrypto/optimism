@@ -19,6 +19,8 @@ import (
 // cmdRunner abstracts command execution for testing
 type cmdRunner interface {
 	CombinedOutput() ([]byte, error)
+	Dir() string
+	SetDir(dir string)
 }
 
 // defaultCmdRunner is the default implementation that uses exec.Command
@@ -28,6 +30,14 @@ type defaultCmdRunner struct {
 
 func (r *defaultCmdRunner) CombinedOutput() ([]byte, error) {
 	return r.Cmd.CombinedOutput()
+}
+
+func (r *defaultCmdRunner) Dir() string {
+	return r.Cmd.Dir
+}
+
+func (r *defaultCmdRunner) SetDir(dir string) {
+	r.Cmd.Dir = dir
 }
 
 // cmdFactory creates commands
