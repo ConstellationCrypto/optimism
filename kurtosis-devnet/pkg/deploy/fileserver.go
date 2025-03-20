@@ -33,7 +33,7 @@ func (f *FileServer) URL(path ...string) string {
 	return fmt.Sprintf("http://%s/%s", FILESERVER_PACKAGE, strings.Join(path, "/"))
 }
 
-func (f *FileServer) Deploy(ctx context.Context, sourceDir string, stateCh <-chan *fileserverState) (retErr error) {
+func (f *FileServer) Deploy(ctx context.Context, sourceDir string, stateCh <-chan *fileserverState) error {
 	if f.fs == nil {
 		f.fs = afero.NewOsFs()
 	}
