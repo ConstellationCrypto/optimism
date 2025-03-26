@@ -119,13 +119,14 @@ func (h *basicSystemTestHelper) AcquireSystem(t BasicT, validators ...Preconditi
 	sys, err := tryAcquirers(t, h.acquirers)
 	if err != nil {
 		h.handlePreconditionError(t, err)
-		return nil, nil
+		return nil, nil // handlePreconditionError already skipped or failed but make it clear we don't continue
 	}
 
 	for _, validator := range validators {
 		ctx, err := validator(wt, sys)
 		if err != nil {
 			h.handlePreconditionError(t, err)
+			return nil, nil // handlePreconditionError already skipped or failed but make it clear we don't continue
 		}
 		wt = wt.WithContext(ctx)
 	}
@@ -139,7 +140,7 @@ func (h *basicSystemTestHelper) AcquireInteropSystem(t BasicT, validators ...Pre
 		return wt, sys
 	} else {
 		h.handlePreconditionError(t, fmt.Errorf("interop test requested, but system is not an interop system"))
-		return nil, nil
+		return nil, nil // handlePreconditionError already skipped or failed but make it clear we don't continue
 	}
 }
 
