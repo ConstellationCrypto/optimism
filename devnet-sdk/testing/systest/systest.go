@@ -70,8 +70,8 @@ type InteropSystemTestFunc func(t T, sys system.InteropSystem)
 
 // systemTestHelper defines the interface for system test functionality
 type systemTestHelper interface {
-	SystemTest(t BasicT, f SystemTestFunc, validators ...PreconditionValidator)
-	InteropSystemTest(t BasicT, f InteropSystemTestFunc, validators ...PreconditionValidator)
+	AcquireSystem(t BasicT, validators ...PreconditionValidator) (T, system.System)
+	AcquireInteropSystem(t BasicT, validators ...PreconditionValidator) (T, system.InteropSystem)
 	WithAcquirers(acquirers []SystemAcquirer) *basicSystemTestHelper
 	WithProvider(provider systemProvider) *basicSystemTestHelper
 }
@@ -107,19 +107,19 @@ func (h *basicSystemTestHelper) handlePreconditionError(t BasicT, err error) {
 	}
 }
 
-func (h *basicSystemTestHelper) SystemTest(t BasicT, f SystemTestFunc, validators ...PreconditionValidator) {
+func (h *basicSystemTestHelper) AcquireSystem(t BasicT, validators ...PreconditionValidator) (T, system.System) {
 	wt := NewT(t)
 	wt.Helper()
 
 	ctx, cancel := context.WithCancel(wt.Context())
-	defer cancel()
+	t.Cleanup(cancel)
 
 	wt = wt.WithContext(ctx)
 
 	sys, err := tryAcquirers(t, h.acquirers)
 	if err != nil {
 		h.handlePreconditionError(t, err)
-		return
+		return nil, nil
 	}
 
 	for _, validator := range validators {
@@ -129,19 +129,18 @@ func (h *basicSystemTestHelper) SystemTest(t BasicT, f SystemTestFunc, validator
 		}
 		wt = wt.WithContext(ctx)
 	}
-
-	f(wt, sys)
+	return wt, sys
 }
 
-func (h *basicSystemTestHelper) InteropSystemTest(t BasicT, f InteropSystemTestFunc, validators ...PreconditionValidator) {
+func (h *basicSystemTestHelper) AcquireInteropSystem(t BasicT, validators ...PreconditionValidator) (T, system.InteropSystem) {
 	t.Helper()
-	h.SystemTest(t, func(t T, sys system.System) {
-		if sys, ok := sys.(system.InteropSystem); ok {
-			f(t, sys)
-		} else {
-			h.handlePreconditionError(t, fmt.Errorf("interop test requested, but system is not an interop system"))
-		}
-	}, validators...)
+	wt, sys := h.AcquireSystem(t, validators...)
+	if sys, ok := sys.(system.InteropSystem); ok {
+		return wt, sys
+	} else {
+		h.handlePreconditionError(t, fmt.Errorf("interop test requested, but system is not an interop system"))
+		return nil, nil
+	}
 }
 
 // newBasicSystemTestHelper creates a new basicSystemTestHelper using environment variables
@@ -180,12 +179,24 @@ func (h *basicSystemTestHelper) WithProvider(provider systemProvider) *basicSyst
 	return &newHelper
 }
 
+// AcquireSystem delegates to the default helper
+func AcquireSystem(t BasicT, validators ...PreconditionValidator) (T, system.System) {
+	return defaultHelper.AcquireSystem(t, validators...)
+}
+
+// AcquireInteropSystem delegates to the default helper
+func AcquireInteropSystem(t BasicT, validators ...PreconditionValidator) (T, system.InteropSystem) {
+	return defaultHelper.AcquireInteropSystem(t, validators...)
+}
+
 // SystemTest delegates to the default helper
 func SystemTest(t BasicT, f SystemTestFunc, validators ...PreconditionValidator) {
-	defaultHelper.SystemTest(t, f, validators...)
+	wt, sys := defaultHelper.AcquireSystem(t, validators...)
+	f(wt, sys)
 }
 
 // InteropSystemTest delegates to the default helper
 func InteropSystemTest(t BasicT, f InteropSystemTestFunc, validators ...PreconditionValidator) {
-	defaultHelper.InteropSystemTest(t, f, validators...)
+	wt, sys := defaultHelper.AcquireInteropSystem(t, validators...)
+	f(wt, sys)
 }

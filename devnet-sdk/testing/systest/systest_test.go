@@ -28,7 +28,7 @@ func (h *mockSystemTestHelper) handlePreconditionError(t BasicT, err error) {
 	}
 }
 
-func (h *mockSystemTestHelper) SystemTest(t BasicT, f SystemTestFunc, validators ...PreconditionValidator) {
+func (h *mockSystemTestHelper) AcquireSystem(t BasicT, validators ...PreconditionValidator) (T, system.System) {
 	h.systemTestCalls++
 	wt := NewT(t)
 
@@ -39,30 +39,30 @@ func (h *mockSystemTestHelper) SystemTest(t BasicT, f SystemTestFunc, validators
 	sys, err := h.systemAcquirer()
 	if err != nil {
 		h.handlePreconditionError(t, err)
-		return
+		return nil, nil
 	}
 
 	for _, validator := range validators {
 		ctx, err := validator(wt, sys)
 		if err != nil {
 			h.handlePreconditionError(t, err)
-			return
+			return nil, nil
 		}
 		wt = wt.WithContext(ctx)
 	}
 
-	f(wt, sys)
+	return wt, sys
 }
 
-func (h *mockSystemTestHelper) InteropSystemTest(t BasicT, f InteropSystemTestFunc, validators ...PreconditionValidator) {
+func (h *mockSystemTestHelper) AcquireInteropSystem(t BasicT, validators ...PreconditionValidator) (T, system.InteropSystem) {
 	h.interopTestCalls++
-	h.SystemTest(t, func(t T, sys system.System) {
-		if sys, ok := sys.(system.InteropSystem); ok {
-			f(t, sys)
-		} else {
-			h.handlePreconditionError(t, fmt.Errorf("interop test requested, but system is not an interop system"))
-		}
-	}, validators...)
+	wt, sys := h.AcquireSystem(t, validators...)
+	if sys, ok := sys.(system.InteropSystem); ok {
+		return wt, sys
+	} else {
+		h.handlePreconditionError(t, fmt.Errorf("interop test requested, but system is not an interop system"))
+	}
+	return nil, nil
 }
 
 // mockEnvGetter implements envGetter for testing
@@ -145,9 +145,9 @@ func TestSystemTest(t *testing.T) {
 				}
 
 				recorder := &mockTBRecorder{mockTB: mockTB{name: "test"}}
-				helper.SystemTest(recorder, func(t T, sys system.System) {
-					t.Fatal("test function should not be called")
-				})
+				wt, sys := helper.AcquireSystem(recorder)
+				require.Nil(t, wt, "should not return wt")
+				require.Nil(t, sys, "should not return system")
 
 				require.Equal(t, tc.expectSkip, recorder.skipped, "unexpected skip state")
 				require.Equal(t, tc.expectFatal, recorder.failed, "unexpected fatal state")
@@ -164,12 +164,9 @@ func TestSystemTest(t *testing.T) {
 			},
 		}
 
-		called := false
-		helper.SystemTest(t, func(t T, sys system.System) {
-			called = true
-			require.NotNil(t, sys)
-		})
-		require.True(t, called)
+		wt, sys := helper.AcquireSystem(t)
+		require.NotNil(t, wt)
+		require.NotNil(t, sys)
 	})
 
 	t.Run("with validator", func(t *testing.T) {
@@ -180,19 +177,16 @@ func TestSystemTest(t *testing.T) {
 		}
 
 		validatorCalled := false
-		testCalled := false
 
 		validator := func(t T, sys system.System) (context.Context, error) {
 			validatorCalled = true
 			return t.Context(), nil
 		}
 
-		helper.SystemTest(t, func(t T, sys system.System) {
-			testCalled = true
-		}, validator)
-
+		wt, sys := helper.AcquireSystem(t, validator)
+		require.NotNil(t, wt)
+		require.NotNil(t, sys)
 		require.True(t, validatorCalled)
-		require.True(t, testCalled)
 	})
 
 	t.Run("multiple validators", func(t *testing.T) {
@@ -208,7 +202,9 @@ func TestSystemTest(t *testing.T) {
 			return t.Context(), nil
 		}
 
-		helper.SystemTest(t, func(t T, sys system.System) {}, validator, validator, validator)
+		wt, sys := helper.AcquireSystem(t, validator, validator, validator)
+		require.NotNil(t, wt)
+		require.NotNil(t, sys)
 		require.Equal(t, 3, validatorCount)
 	})
 }
@@ -223,11 +219,9 @@ func TestInteropSystemTest(t *testing.T) {
 		}
 
 		recorder := &mockTBRecorder{mockTB: mockTB{name: "test"}}
-		called := false
-		helper.InteropSystemTest(recorder, func(t T, sys system.InteropSystem) {
-			called = true
-		})
-		require.False(t, called)
+		wt, sys := helper.AcquireInteropSystem(recorder)
+		require.Nil(t, wt, "should not return wt")
+		require.Nil(t, sys, "should not return interop system")
 		require.Len(t, helper.preconditionErrors, 1)
 		require.Contains(t, helper.preconditionErrors[0].Error(), "interop test requested")
 	})
@@ -239,12 +233,10 @@ func TestInteropSystemTest(t *testing.T) {
 			},
 		}
 
-		called := false
-		helper.InteropSystemTest(t, func(t T, sys system.InteropSystem) {
-			called = true
-			require.NotNil(t, sys.InteropSet())
-		})
-		require.True(t, called)
+		wt, sys := helper.AcquireInteropSystem(t)
+		require.NotNil(t, wt)
+		require.NotNil(t, sys)
+		require.NotNil(t, sys.InteropSet())
 		require.Empty(t, helper.preconditionErrors)
 	})
 }
@@ -294,9 +286,11 @@ func TestPreconditionHandling(t *testing.T) {
 			recorder := &mockTBRecorder{mockTB: mockTB{name: "test"}}
 			testErr := fmt.Errorf("test precondition error")
 
-			helper.SystemTest(recorder, func(t T, sys system.System) {}, func(t T, sys system.System) (context.Context, error) {
+			wt, sys := helper.AcquireSystem(recorder, func(t T, sys system.System) (context.Context, error) {
 				return t.Context(), testErr
 			})
+			require.Nil(t, wt)
+			require.Nil(t, sys)
 
 			require.Equal(t, tc.expectSkip, recorder.skipped, "unexpected skip state")
 			require.Equal(t, tc.expectFatal, recorder.failed, "unexpected fatal state")

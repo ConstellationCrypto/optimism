@@ -347,10 +347,7 @@ func TestSystemAcquisition(t *testing.T) {
 		helper := newBasicSystemTestHelper(&mockEnvGetter{}).
 			WithAcquirers(acquirers)
 
-		var acquiredSys system.System
-		helper.SystemTest(t, func(t T, sys system.System) {
-			acquiredSys = sys
-		})
+		_, acquiredSys := helper.AcquireSystem(t)
 		require.Equal(t, sys1, acquiredSys)
 	})
 
@@ -389,9 +386,9 @@ func TestSystemAcquisition(t *testing.T) {
 				helper.expectPreconditionsMet = tc.expectMet
 
 				recorder := &mockTBRecorder{mockTB: mockTB{name: "test"}}
-				helper.SystemTest(recorder, func(t T, sys system.System) {
-					require.Fail(t, "should not reach here")
-				})
+				wt, sys := helper.AcquireSystem(recorder)
+				require.Nil(t, wt)
+				require.Nil(t, sys)
 
 				require.Equal(t, tc.expectSkip, recorder.skipped, "unexpected skip state")
 				require.Equal(t, tc.expectFatal, recorder.failed, "unexpected fatal state")
@@ -439,9 +436,9 @@ func TestSystemAcquisition(t *testing.T) {
 				helper.expectPreconditionsMet = tc.expectMet
 
 				recorder := &mockTBRecorder{mockTB: mockTB{name: "test"}}
-				helper.SystemTest(recorder, func(t T, sys system.System) {
-					require.Fail(t, "should not reach here")
-				})
+				wt, sys := helper.AcquireSystem(recorder)
+				require.Nil(t, wt)
+				require.Nil(t, sys)
 
 				require.Equal(t, tc.expectSkip, recorder.skipped, "unexpected skip state")
 				require.Equal(t, tc.expectFatal, recorder.failed, "unexpected fatal state")
