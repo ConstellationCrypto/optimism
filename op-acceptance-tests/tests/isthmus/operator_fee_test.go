@@ -30,8 +30,8 @@ import (
 )
 
 // TestFees verifies that L1/L2 fees are handled properly in different fork configurations
-func TestOperatorFee(t *testing.T) {
-	logger := testlog.Logger(t, slog.LevelDebug)
+func TestOperatorFee(x *testing.T) {
+	logger := testlog.Logger(x, slog.LevelDebug)
 	// Define which L2 chain we'll test
 	chainIdx := uint64(0)
 
@@ -47,13 +47,59 @@ func TestOperatorFee(t *testing.T) {
 	_, forkValidator := validators.AcquireL2WithFork(chainIdx, rollup.Isthmus)
 	nodesValidator := validators.HasSufficientL2Nodes(chainIdx, 2)
 	logger.Info("Running system test", "fork", "Isthmus", "nodes", 2)
-	systest.SystemTest(t,
-		operatorFeeTestScenario(l1WalletGetter, l2WalletGetter, chainIdx, logger),
-		l2WalletValidator,
-		l1WalletValidator,
-		forkValidator,
-		nodesValidator,
-	)
+	t, sys := systest.AcquireSystem(x, l2WalletValidator, l1WalletValidator, forkValidator, nodesValidator)
+	logger.Info("Starting operator fee test scenario", "chain", chainIdx)
+	// Get the low-level system and wallet
+	l1Wallet := l1WalletGetter(t.Context())
+	l2Wallet := l2WalletGetter(t.Context())
+	logger.Info("Acquired wallets",
+		"l1_wallet", l1Wallet.Address().Hex(),
+		"l2_wallet", l2Wallet.Address().Hex())
+
+	// Define test cases with different operator fee parameters
+	testCases := []struct {
+		name                   string
+		operatorFeeConstant    uint64
+		operatorFeeScalar      uint32
+		expectedFeeCalculation string // Description of how fees should be calculated
+	}{
+		{
+			name:                   "Zero fees",
+			operatorFeeConstant:    0,
+			operatorFeeScalar:      0,
+			expectedFeeCalculation: "No operator fee should be charged",
+		},
+		{
+			name:                   "Constant fee only",
+			operatorFeeConstant:    1000,
+			operatorFeeScalar:      0,
+			expectedFeeCalculation: "Only constant fee component should be charged",
+		},
+		{
+			name:                   "Scalar fee only",
+			operatorFeeConstant:    0,
+			operatorFeeScalar:      500, // 5% (scalar is in basis points)
+			expectedFeeCalculation: "Fee should be proportional to base fee",
+		},
+		{
+			name:                   "Both constant and scalar",
+			operatorFeeConstant:    1000,
+			operatorFeeScalar:      500, // 5%
+			expectedFeeCalculation: "Fee should include both constant and proportional components",
+		},
+	}
+
+	// For each test case, verify the operator fee parameters
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t systest.T) {
+			testLogger := logger.New("test_case", tc.name)
+			testLogger.Info("Running test case",
+				"description", tc.expectedFeeCalculation,
+				"constant", tc.operatorFeeConstant,
+				"scalar", tc.operatorFeeScalar)
+			performOperatorFeeTest(t, sys, l1Wallet, l2Wallet, chainIdx, tc.operatorFeeConstant, tc.operatorFeeScalar, testLogger)
+		})
+	}
 }
 
 // stateGetterAdapter adapts the ethclient to implement the StateGetter interface
@@ -461,69 +507,6 @@ func performOperatorFeeTest(t systest.T, sys system.System, l1FundingWallet syst
 	// Assert that actual end balances match what we calculated
 	logger.Info("Verifying actual balances match expected balances")
 	AssertSnapshotsEqual(t, expectedEndBalances, endBalances)
-}
-
-// operatorFeeTestScenario creates a test scenario for verifying fee calculations
-func operatorFeeTestScenario(
-	l1WalletGetter validators.WalletGetter,
-	l2WalletGetter validators.WalletGetter,
-	chainIdx uint64,
-	logger log.Logger,
-) systest.SystemTestFunc {
-	return func(t systest.T, sys system.System) {
-		logger.Info("Starting operator fee test scenario", "chain", chainIdx)
-		// Get the low-level system and wallet
-		l1Wallet := l1WalletGetter(t.Context())
-		l2Wallet := l2WalletGetter(t.Context())
-		logger.Info("Acquired wallets",
-			"l1_wallet", l1Wallet.Address().Hex(),
-			"l2_wallet", l2Wallet.Address().Hex())
-
-		// Define test cases with different operator fee parameters
-		testCases := []struct {
-			name                   string
-			operatorFeeConstant    uint64
-			operatorFeeScalar      uint32
-			expectedFeeCalculation string // Description of how fees should be calculated
-		}{
-			{
-				name:                   "Zero fees",
-				operatorFeeConstant:    0,
-				operatorFeeScalar:      0,
-				expectedFeeCalculation: "No operator fee should be charged",
-			},
-			{
-				name:                   "Constant fee only",
-				operatorFeeConstant:    1000,
-				operatorFeeScalar:      0,
-				expectedFeeCalculation: "Only constant fee component should be charged",
-			},
-			{
-				name:                   "Scalar fee only",
-				operatorFeeConstant:    0,
-				operatorFeeScalar:      500, // 5% (scalar is in basis points)
-				expectedFeeCalculation: "Fee should be proportional to base fee",
-			},
-			{
-				name:                   "Both constant and scalar",
-				operatorFeeConstant:    1000,
-				operatorFeeScalar:      500, // 5%
-				expectedFeeCalculation: "Fee should include both constant and proportional components",
-			},
-		}
-
-		// For each test case, verify the operator fee parameters
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t systest.T) {
-				testLogger := logger.New("test_case", tc.name)
-				testLogger.Info("Running test case",
-					"description", tc.expectedFeeCalculation,
-					"constant", tc.operatorFeeConstant,
-					"scalar", tc.operatorFeeScalar)
-				performOperatorFeeTest(t, sys, l1Wallet, l2Wallet, chainIdx, tc.operatorFeeConstant, tc.operatorFeeScalar, testLogger)
-			})
-		}
-	}
 }
 
 func RequireOperatorFeeParamValues(t systest.T, systemConfig *bindings.SystemConfig, blockNumber *big.Int, expectedOperatorFeeConstant uint64, expectedOperatorFeeScalar uint32) {
