@@ -51,6 +51,14 @@ func (id ChainID) Bytes32() [32]byte {
 	return (*uint256.Int)(&id).Bytes32()
 }
 
+func (id ChainID) IsUint64() bool {
+	return (*uint256.Int)(&id).IsUint64()
+}
+
+func (id ChainID) Uint64() uint64 {
+	return (*uint256.Int)(&id).Uint64()
+}
+
 // EvilChainIDToUInt64 converts a ChainID to a uint64 and panic's if the ChainID is too large for a UInt64
 // It is "evil" because 32 byte ChainIDs should be universally supported which this method breaks. It is provided
 // for legacy purposes to facilitate a transition to full 32 byte chain ID support and should not be used in new code.
