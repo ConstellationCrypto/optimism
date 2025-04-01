@@ -53,13 +53,31 @@ func Deploy(logger log.Logger, fa *foundry.ArtifactsFS, srcFS *foundry.SourceMap
 		return nil, nil, fmt.Errorf("failed to enable cheats in L1 state: %w", err)
 	}
 
+	//
+	// Gather all the deployment scripts
+	//
+	// We load them here so that any ABI mismatches get reported before we actually start deploying
+	//
+
+	// DeployImplementations
+	deployImplementations, err := opcm.NewDeployImplementationsScript(l1Host)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load DeployImplementations script: %w", err)
+	}
+
+	// DeploySuperchain
+	deploySuperchain, err := opcm.NewDeploySuperchainScript(l1Host)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load DeploySuperchain script: %w", err)
+	}
+
 	l1Deployment, err := PrepareInitialL1(l1Host, cfg.L1)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to deploy initial L1 content: %w", err)
 	}
 	deployments.L1 = l1Deployment
 
-	superDeployment, err := DeploySuperchainToL1(l1Host, cfg.Superchain)
+	superDeployment, err := DeploySuperchainToL1(l1Host, deployImplementations, deploySuperchain, cfg.Superchain)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to deploy superchain to L1: %w", err)
 	}
@@ -160,10 +178,10 @@ func PrepareInitialL1(l1Host *script.Host, cfg *L1Config) (*L1Deployment, error)
 	return &L1Deployment{}, nil
 }
 
-func DeploySuperchainToL1(l1Host *script.Host, superCfg *SuperchainConfig) (*SuperchainDeployment, error) {
+func DeploySuperchainToL1(l1Host *script.Host, deployImplementations opcm.DeployImplementations2Script, deploySuperchain opcm.DeploySuperchainScript, superCfg *SuperchainConfig) (*SuperchainDeployment, error) {
 	l1Host.SetTxOrigin(superCfg.Deployer)
 
-	superDeployment, err := opcm.DeploySuperchain(l1Host, opcm.DeploySuperchainInput{
+	superDeployment, err := deploySuperchain.Run(opcm.DeploySuperchain2Input{
 		SuperchainProxyAdminOwner:  superCfg.ProxyAdminOwner,
 		ProtocolVersionsOwner:      superCfg.ProtocolVersionsOwner,
 		Guardian:                   superCfg.SuperchainConfigGuardian,
@@ -175,7 +193,7 @@ func DeploySuperchainToL1(l1Host *script.Host, superCfg *SuperchainConfig) (*Sup
 		return nil, fmt.Errorf("failed to deploy Superchain contracts: %w", err)
 	}
 
-	implementationsDeployment, err := opcm.DeployImplementations(l1Host, opcm.DeployImplementationsInput{
+	implementationsDeployment, err := deployImplementations.Run(opcm.DeployImplementations2Input{
 		WithdrawalDelaySeconds:          superCfg.Implementations.FaultProof.WithdrawalDelaySeconds,
 		MinProposalSizeBytes:            superCfg.Implementations.FaultProof.MinProposalSizeBytes,
 		ChallengePeriodSeconds:          superCfg.Implementations.FaultProof.ChallengePeriodSeconds,
@@ -186,7 +204,6 @@ func DeploySuperchainToL1(l1Host *script.Host, superCfg *SuperchainConfig) (*Sup
 		SuperchainConfigProxy:           superDeployment.SuperchainConfigProxy,
 		ProtocolVersionsProxy:           superDeployment.ProtocolVersionsProxy,
 		UpgradeController:               superCfg.ProxyAdminOwner,
-		UseInterop:                      superCfg.Implementations.UseInterop,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to deploy Implementations contracts: %w", err)
