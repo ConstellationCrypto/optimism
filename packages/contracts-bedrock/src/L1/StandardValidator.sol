@@ -157,7 +157,8 @@ contract StandardValidatorBase {
     }
 
     function assertValidSuperchainConfig(string memory _errors) internal view returns (string memory) {
-        _errors = internalRequire(!superchainConfig.paused(), "SPRCFG-10", _errors);
+        // PEP: REVIEW THIS
+        _errors = internalRequire(!superchainConfig.paused(address(0)), "SPRCFG-10", _errors);
         return _errors;
     }
 
@@ -312,7 +313,7 @@ contract StandardValidatorBase {
         _errors =
             internalRequire(address(_portal.superchainConfig()) == address(superchainConfig), "PORTAL-50", _errors);
         _errors = internalRequire(_portal.guardian() == superchainConfig.guardian(), "PORTAL-60", _errors);
-        _errors = internalRequire(_portal.paused() == superchainConfig.paused(), "PORTAL-70", _errors);
+        _errors = internalRequire(_portal.paused() == _sysCfg.paused(), "PORTAL-70", _errors);
         _errors = internalRequire(_portal.l2Sender() == Constants.DEFAULT_L2_SENDER, "PORTAL-80", _errors);
         return _errors;
     }

@@ -361,9 +361,15 @@ library ChainAssertions {
             require(address(portal.systemConfig()) == _contracts.SystemConfig, "CHECK-OP2-30");
             require(portal.guardian() == guardian, "CHECK-OP2-40");
             require(address(portal.superchainConfig()) == address(_contracts.SuperchainConfig), "CHECK-OP2-50");
-            require(portal.paused() == ISuperchainConfig(_contracts.SuperchainConfig).paused(), "CHECK-OP2-60");
+            require(
+                portal.paused() == ISuperchainConfig(_contracts.SuperchainConfig).paused(address(0)), "CHECK-OP2-60"
+            );
             require(portal.l2Sender() == Constants.DEFAULT_L2_SENDER, "CHECK-OP2-70");
             require(address(portal.ethLockbox()) == _contracts.ETHLockbox, "CHECK-OP2-80");
+            require(
+                portal.paused() == ISuperchainConfig(_contracts.SuperchainConfig).paused(address(portal.ethLockbox())),
+                "CHECK-OP2-140"
+            );
         } else {
             require(address(portal.anchorStateRegistry()) == address(0), "CHECK-OP2-80");
             require(address(portal.systemConfig()) == address(0), "CHECK-OP2-90");
@@ -462,12 +468,13 @@ library ChainAssertions {
             _offset: 0
         });
 
+        // PEP: Check back here
         if (_isProxy) {
             require(superchainConfig.guardian() == _cfg.superchainConfigGuardian(), "CHECK-SC-20");
-            require(superchainConfig.paused() == _isPaused, "CHECK-SC-30");
+            require(superchainConfig.paused(address(0)) == _isPaused, "CHECK-SC-30");
         } else {
             require(superchainConfig.guardian() == address(0), "CHECK-SC-40");
-            require(superchainConfig.paused() == false, "CHECK-SC-50");
+            require(superchainConfig.paused(address(0)) == false, "CHECK-SC-50");
         }
     }
 

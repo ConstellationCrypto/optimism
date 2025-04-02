@@ -67,7 +67,9 @@ contract ETHLockboxTest is CommonTest {
         assertEq(ethLockbox.paused(), false);
 
         // Mock the superchain config to return true for the paused status
-        vm.mockCall(address(superchainConfig), abi.encodeCall(ISuperchainConfig.paused, ()), abi.encode(true));
+        vm.mockCall(
+            address(superchainConfig), abi.encodeCall(ISuperchainConfig.paused, (address(ethLockbox))), abi.encode(true)
+        );
 
         // Assert the paused status is true
         assertEq(ethLockbox.paused(), true);
@@ -197,7 +199,9 @@ contract ETHLockboxTest is CommonTest {
     /// @notice Tests `unlockETH` reverts when the contract is paused.
     function testFuzz_unlockETH_paused_reverts(address _caller, uint256 _value) public {
         // Mock the superchain config to return true for the paused status
-        vm.mockCall(address(superchainConfig), abi.encodeCall(ISuperchainConfig.paused, ()), abi.encode(true));
+        vm.mockCall(
+            address(superchainConfig), abi.encodeCall(ISuperchainConfig.paused, (address(ethLockbox))), abi.encode(true)
+        );
 
         // Expect the revert with `Paused` selector
         vm.expectRevert(IETHLockbox.ETHLockbox_Paused.selector);

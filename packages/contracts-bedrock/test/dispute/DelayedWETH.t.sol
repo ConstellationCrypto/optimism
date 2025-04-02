@@ -157,7 +157,7 @@ contract DelayedWETH_Withdraw_Test is DelayedWETH_Init {
         // Pause the contract.
         address guardian = optimismPortal2.guardian();
         vm.prank(guardian);
-        superchainConfig.pause("identifier");
+        superchainConfig.pause(address(0));
 
         // Withdraw fails.
         vm.expectRevert("DelayedWETH: contract is paused");
@@ -261,7 +261,7 @@ contract DelayedWETH_WithdrawFrom_Test is DelayedWETH_Init {
         // Pause the contract.
         address guardian = optimismPortal2.guardian();
         vm.prank(guardian);
-        superchainConfig.pause("identifier");
+        superchainConfig.pause(address(0));
 
         // Withdraw fails.
         vm.expectRevert("DelayedWETH: contract is paused");

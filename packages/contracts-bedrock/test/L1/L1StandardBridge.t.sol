@@ -63,13 +63,13 @@ contract L1StandardBridge_Pause_Test is CommonTest {
     /// @dev Verifies that the `paused` accessor returns the same value as the `paused` function of the
     ///      `superchainConfig`.
     function test_paused_succeeds() external view {
-        assertEq(l1StandardBridge.paused(), superchainConfig.paused());
+        assertEq(l1StandardBridge.paused(), superchainConfig.paused(address(0)));
     }
 
     /// @dev Ensures that the `paused` function of the bridge contract actually calls the `paused` function of the
     ///      `superchainConfig`.
     function test_pause_callsSuperchainConfig_succeeds() external {
-        vm.expectCall(address(superchainConfig), abi.encodeCall(ISuperchainConfig.paused, ()));
+        vm.expectCall(address(superchainConfig), abi.encodeCall(ISuperchainConfig.paused, (address(0))));
         l1StandardBridge.paused();
     }
 
@@ -77,13 +77,13 @@ contract L1StandardBridge_Pause_Test is CommonTest {
     ///      it's been changed.
     function test_pause_matchesSuperchainConfig_succeeds() external {
         assertFalse(l1StandardBridge.paused());
-        assertEq(l1StandardBridge.paused(), superchainConfig.paused());
+        assertEq(l1StandardBridge.paused(), superchainConfig.paused(address(0)));
 
         vm.prank(superchainConfig.guardian());
-        superchainConfig.pause("identifier");
+        superchainConfig.pause(address(0));
 
         assertTrue(l1StandardBridge.paused());
-        assertEq(l1StandardBridge.paused(), superchainConfig.paused());
+        assertEq(l1StandardBridge.paused(), superchainConfig.paused(address(0)));
     }
 }
 
@@ -93,7 +93,7 @@ contract L1StandardBridge_Pause_TestFail is CommonTest {
     function setUp() public override {
         super.setUp();
         vm.prank(superchainConfig.guardian());
-        superchainConfig.pause("identifier");
+        superchainConfig.pause(address(0));
         assertTrue(l1StandardBridge.paused());
 
         vm.deal(address(l1StandardBridge.messenger()), 1 ether);
