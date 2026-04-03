@@ -6,9 +6,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
+	bss "github.com/ethereum-optimism/optimism/op-batcher/batcher"
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
 	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
 	"github.com/ethereum-optimism/optimism/op-devstack/presets"
+	"github.com/ethereum-optimism/optimism/op-devstack/sysgo"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 )
@@ -20,7 +24,15 @@ func TestSequencingWindowExpiry(gt *testing.T) {
 	gt.Skip("Skipping Interop Acceptance Test")
 	t := devtest.SerialT(gt)
 
-	sys := presets.NewSimpleInterop(t)
+	sys := presets.NewSimpleInterop(t,
+		presets.WithDeployerOptions(sysgo.WithSequencingWindow(10)),
+		presets.WithBatcherOption(func(id sysgo.ComponentTarget, cfg *bss.CLIConfig) {
+			// Span-batches during recovery don't appear to align well with the starting-point.
+			// It can be off by ~6 L2 blocks, possibly due to off-by-one in L1 block sync
+			// considerations in batcher stop or start.
+			cfg.BatchType = derive.SingularBatchType
+		}),
+	)
 	require := t.Require()
 
 	alice := sys.FunderA.NewFundedEOA(eth.OneHundredthEther)
@@ -36,7 +48,7 @@ func TestSequencingWindowExpiry(gt *testing.T) {
 	require.Eventually(func() bool {
 		stat, err := sys.L2CLA.Escape().RollupAPI().SyncStatus(t.Ctx())
 		require.NoError(err)
-		return stat.SafeL2.Number > receipt1.BlockNumber.Uint64()
+		return stat.SafeL2.Number > bigs.Uint64Strict(receipt1.BlockNumber)
 	}, time.Second*45, time.Second, "wait for tx 1 to be safe")
 	t.Logger().Info("Tx 1 is safe now")
 
@@ -74,7 +86,7 @@ func TestSequencingWindowExpiry(gt *testing.T) {
 	receipt2, err := tx2.Included.Eval(t.Ctx())
 	require.NoError(err)
 	// Now get the block that included the tx. This block will change.
-	old := eth.L2BlockRef{Hash: receipt2.BlockHash, Number: receipt2.BlockNumber.Uint64()}
+	old := eth.L2BlockRef{Hash: receipt2.BlockHash, Number: bigs.Uint64Strict(receipt2.BlockNumber)}
 	t.Logger().Info("Confirmed tx 2, which will be reorged out later",
 		"tx", receipt2.TxHash, "l2Block", old)
 	// The logs will show a "Chain reorg detected" from op-geth.
@@ -157,10 +169,10 @@ func TestSequencingWindowExpiry(gt *testing.T) {
 		status := sys.L2CLA.SyncStatus()
 		t.Logger().Info("Awaiting tx safety",
 			"local-unsafe", status.UnsafeL2, "local-safe", status.LocalSafeL2)
-		return status.SafeL2.Number > receipt3.BlockNumber.Uint64()
+		return status.SafeL2.Number > bigs.Uint64Strict(receipt3.BlockNumber)
 	}, time.Second*60, time.Second, "wait for tx 3 to be safe")
 	t.Logger().Info("Tx 3 is safe now")
 	// Sanity check the block the tx was included is really still canonical
-	got := sys.L2ELA.BlockRefByNumber(receipt3.BlockNumber.Uint64())
+	got := sys.L2ELA.BlockRefByNumber(bigs.Uint64Strict(receipt3.BlockNumber))
 	t.Require().Equal(receipt3.BlockHash, got.Hash, "tx 3 was included in canonical block")
 }

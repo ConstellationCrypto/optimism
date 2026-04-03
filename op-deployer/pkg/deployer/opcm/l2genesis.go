@@ -23,11 +23,23 @@ type L2GenesisInput struct {
 	L1FeeVaultRecipient                      common.Address
 	L1FeeVaultMinimumWithdrawalAmount        *big.Int
 	L1FeeVaultWithdrawalNetwork              *big.Int
+	OperatorFeeVaultRecipient                common.Address
+	OperatorFeeVaultMinimumWithdrawalAmount  *big.Int
+	OperatorFeeVaultWithdrawalNetwork        *big.Int
 	GovernanceTokenOwner                     common.Address
 	Fork                                     *big.Int
 	DeployCrossL2Inbox                       bool
 	EnableGovernance                         bool
 	FundDevAccounts                          bool
+	UseRevenueShare                          bool
+	ChainFeesRecipient                       common.Address
+	L1FeesDepositor                          common.Address
+	UseCustomGasToken                        bool
+	GasPayingTokenName                       string
+	GasPayingTokenSymbol                     string
+	NativeAssetLiquidityAmount               *big.Int
+	LiquidityControllerOwner                 common.Address
+	UseL2CM                                  bool
 }
 
 type L2GenesisScript script.DeployScriptWithoutOutput[L2GenesisInput]

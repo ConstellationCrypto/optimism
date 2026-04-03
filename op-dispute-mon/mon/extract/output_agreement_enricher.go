@@ -64,13 +64,15 @@ func (o *OutputAgreementEnricher) Enrich(ctx context.Context, block rpcblock.Blo
 	if len(o.clients) == 0 {
 		return fmt.Errorf("%w but required for game type %v", ErrRollupRpcRequired, game.GameType)
 	}
-	if game.L2BlockNumber > math.MaxInt64 {
+	if game.L2SequenceNumber > math.MaxInt64 {
 		// The claimed block number is bigger than an int64. The BlockNumber type used by RPCs is an int64 so anything
 		// bigger than that can't be a valid block. So we can determine that this proposal invalid just because it
 		// has a ridiculously big block number which must be far in the future.
 		game.AgreeWithClaim = false
 		return nil
 	}
+
+	game.NodeEndpointTotalCount = len(o.clients)
 
 	results := make([]outputResult, len(o.clients))
 	var wg sync.WaitGroup
@@ -90,7 +92,7 @@ func (o *OutputAgreementEnricher) Enrich(ctx context.Context, block rpcblock.Blo
 				return
 			}
 
-			output, err := client.OutputAtBlock(ctx, game.L2BlockNumber)
+			output, err := client.OutputAtBlock(ctx, game.L2SequenceNumber)
 			if err != nil {
 				// Only treat JSON-RPC application-level "not found" as notFound.
 				// Transport/HTTP errors or other failures should be treated as errors.
@@ -108,17 +110,26 @@ func (o *OutputAgreementEnricher) Enrich(ctx context.Context, block rpcblock.Blo
 			outputRoot := common.Hash(output.OutputRoot)
 			results[i] = outputResult{outputRoot: outputRoot}
 
-			// Only check if the output root is safe if it matches the game's root claim
+			// If the output root that we computed matches the game's root claim, the game could
+			// still technically be invalid if the block that the game corresponds was not
+			// considered a "safe" block at the time the game was proposed. In this case, "safe"
+			// means that the block's data was fully available on the L1 at the time the game was
+			// proposed. The game itself is still "safe" from a security/liveness perspective, but
+			// the game would be challenged by an honest proposer.
 			if outputRoot == game.RootClaim {
 				safeHead, err := client.SafeHeadAtL1Block(ctx, game.L1HeadNum)
 				if err != nil {
-					o.log.Warn("Unable to verify proposed block was safe", "l1HeadNum", game.L1HeadNum, "l2BlockNum", game.L2BlockNumber, "err", err)
-					// If safe head data isn't available, assume the output root was safe
-					// Avoids making the dispute mon dependent on safe head db being available
+					// If safe head data isn't available, we can still consider the output root to
+					// be safe, which avoids making the dispute mon dependent on safe head db being
+					// available. There is no impact on actual user security/liveness, but if this
+					// case gets hit AND the game actually was not backed up by L1 data, the game
+					// could resolve counter to the dispute-mon prediction. An alert would fire in
+					// this case but there would be no security impact.
+					o.log.Warn("Unable to verify proposed block was safe", "l1HeadNum", game.L1HeadNum, "l2SequenceNumber", game.L2SequenceNumber, "err", err)
 					results[i].isSafe = true
 					return
 				}
-				results[i].isSafe = safeHead.SafeHead.Number >= game.L2BlockNumber
+				results[i].isSafe = safeHead.SafeHead.Number >= game.L2SequenceNumber
 			}
 		}(i, client)
 	}
@@ -128,17 +139,31 @@ func (o *OutputAgreementEnricher) Enrich(ctx context.Context, block rpcblock.Blo
 	foundResults := make([]outputResult, 0, len(results))
 	for idx, result := range results {
 		if result.err != nil {
-			o.log.Error("Failed to fetch output root", "clientIndex", idx, "l2BlockNum", game.L2BlockNumber, "err", result.err)
+			o.log.Error("Failed to fetch output root", "clientIndex", idx, "l2SequenceNumber", game.L2SequenceNumber, "err", result.err)
+			endpointID := fmt.Sprintf("client-%d", idx)
+			game.NodeEndpointErrors[endpointID] = true
+			game.NodeEndpointErrorCount++
 			continue
 		}
 		if result.gameL1HeadUnprocessed {
+			game.NodeEndpointOutOfSyncCount++
 			continue
 		}
 
 		validResults = append(validResults, result)
 
-		if !result.notFound {
+		if result.notFound {
+			game.NodeEndpointNotFoundCount++
+		} else {
 			foundResults = append(foundResults, result)
+			// Track safety counts only for found results where the output root matches the game's root claim
+			if result.outputRoot == game.RootClaim {
+				if result.isSafe {
+					game.NodeEndpointSafeCount++
+				} else {
+					game.NodeEndpointUnsafeCount++
+				}
+			}
 		}
 	}
 
@@ -167,6 +192,7 @@ func (o *OutputAgreementEnricher) Enrich(ctx context.Context, block rpcblock.Blo
 		for _, result := range foundResults[1:] {
 			if result.outputRoot != firstResult.outputRoot {
 				diverged = true
+				game.NodeEndpointDifferentRoots = true
 				break
 			}
 		}
@@ -174,7 +200,7 @@ func (o *OutputAgreementEnricher) Enrich(ctx context.Context, block rpcblock.Blo
 
 	if diverged {
 		o.log.Warn("Nodes disagree on output root",
-			"l2BlockNum", game.L2BlockNumber,
+			"l2SequenceNumber", game.L2SequenceNumber,
 			"firstOutput", firstResult.outputRoot,
 			"found", len(foundResults),
 			"valid", len(validResults))

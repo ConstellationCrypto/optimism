@@ -10,6 +10,7 @@ import (
 	"time"
 
 	altda "github.com/ethereum-optimism/optimism/op-alt-da"
+	"github.com/ethereum-optimism/optimism/op-core/forks"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -127,6 +128,10 @@ type Config struct {
 	// JovianTime sets the activation time of the Jovian network upgrade.
 	// Active if JovianTime != nil && L2 block timestamp >= *JovianTime, inactive otherwise.
 	JovianTime *uint64 `json:"jovian_time,omitempty"`
+
+	// KarstTime sets the activation time of the Karst network upgrade.
+	// Active if KarstTime != nil && L2 block timestamp >= *KarstTime, inactive otherwise.
+	KarstTime *uint64 `json:"karst_time,omitempty"`
 
 	// InteropTime sets the activation time for an experimental feature-set, activated like a hardfork.
 	// Active if InteropTime != nil && L2 block timestamp >= *InteropTime, inactive otherwise.
@@ -339,25 +344,25 @@ func (cfg *Config) Check() error {
 		return err
 	}
 
-	if err := checkFork(cfg.RegolithTime, cfg.CanyonTime, Regolith, Canyon); err != nil {
+	if err := checkFork(cfg.RegolithTime, cfg.CanyonTime, forks.Regolith, forks.Canyon); err != nil {
 		return err
 	}
-	if err := checkFork(cfg.CanyonTime, cfg.DeltaTime, Canyon, Delta); err != nil {
+	if err := checkFork(cfg.CanyonTime, cfg.DeltaTime, forks.Canyon, forks.Delta); err != nil {
 		return err
 	}
-	if err := checkFork(cfg.DeltaTime, cfg.EcotoneTime, Delta, Ecotone); err != nil {
+	if err := checkFork(cfg.DeltaTime, cfg.EcotoneTime, forks.Delta, forks.Ecotone); err != nil {
 		return err
 	}
-	if err := checkFork(cfg.EcotoneTime, cfg.FjordTime, Ecotone, Fjord); err != nil {
+	if err := checkFork(cfg.EcotoneTime, cfg.FjordTime, forks.Ecotone, forks.Fjord); err != nil {
 		return err
 	}
-	if err := checkFork(cfg.FjordTime, cfg.GraniteTime, Fjord, Granite); err != nil {
+	if err := checkFork(cfg.FjordTime, cfg.GraniteTime, forks.Fjord, forks.Granite); err != nil {
 		return err
 	}
-	if err := checkFork(cfg.GraniteTime, cfg.HoloceneTime, Granite, Holocene); err != nil {
+	if err := checkFork(cfg.GraniteTime, cfg.HoloceneTime, forks.Granite, forks.Holocene); err != nil {
 		return err
 	}
-	if err := checkFork(cfg.HoloceneTime, cfg.IsthmusTime, Holocene, Isthmus); err != nil {
+	if err := checkFork(cfg.HoloceneTime, cfg.IsthmusTime, forks.Holocene, forks.Isthmus); err != nil {
 		return err
 	}
 
@@ -438,52 +443,57 @@ func (c *Config) IsForkActive(fork ForkName, timestamp uint64) bool {
 
 // IsRegolith returns true if the Regolith hardfork is active at or past the given timestamp.
 func (c *Config) IsRegolith(timestamp uint64) bool {
-	return c.IsForkActive(Regolith, timestamp)
+	return c.IsForkActive(forks.Regolith, timestamp)
 }
 
 // IsCanyon returns true if the Canyon hardfork is active at or past the given timestamp.
 func (c *Config) IsCanyon(timestamp uint64) bool {
-	return c.IsForkActive(Canyon, timestamp)
+	return c.IsForkActive(forks.Canyon, timestamp)
 }
 
 // IsDelta returns true if the Delta hardfork is active at or past the given timestamp.
 func (c *Config) IsDelta(timestamp uint64) bool {
-	return c.IsForkActive(Delta, timestamp)
+	return c.IsForkActive(forks.Delta, timestamp)
 }
 
 // IsEcotone returns true if the Ecotone hardfork is active at or past the given timestamp.
 func (c *Config) IsEcotone(timestamp uint64) bool {
-	return c.IsForkActive(Ecotone, timestamp)
+	return c.IsForkActive(forks.Ecotone, timestamp)
 }
 
 // IsFjord returns true if the Fjord hardfork is active at or past the given timestamp.
 func (c *Config) IsFjord(timestamp uint64) bool {
-	return c.IsForkActive(Fjord, timestamp)
+	return c.IsForkActive(forks.Fjord, timestamp)
 }
 
 // IsGranite returns true if the Granite hardfork is active at or past the given timestamp.
 func (c *Config) IsGranite(timestamp uint64) bool {
-	return c.IsForkActive(Granite, timestamp)
+	return c.IsForkActive(forks.Granite, timestamp)
 }
 
 // IsHolocene returns true if the Holocene hardfork is active at or past the given timestamp.
 func (c *Config) IsHolocene(timestamp uint64) bool {
-	return c.IsForkActive(Holocene, timestamp)
+	return c.IsForkActive(forks.Holocene, timestamp)
 }
 
 // IsIsthmus returns true if the Isthmus hardfork is active at or past the given timestamp.
 func (c *Config) IsIsthmus(timestamp uint64) bool {
-	return c.IsForkActive(Isthmus, timestamp)
+	return c.IsForkActive(forks.Isthmus, timestamp)
 }
 
 // IsJovian returns true if the Jovian hardfork is active at or past the given timestamp.
 func (c *Config) IsJovian(timestamp uint64) bool {
-	return c.IsForkActive(Jovian, timestamp)
+	return c.IsForkActive(forks.Jovian, timestamp)
+}
+
+// IsKarst returns true if the Karst hardfork is active at or past the given timestamp.
+func (c *Config) IsKarst(timestamp uint64) bool {
+	return c.IsForkActive(forks.Karst, timestamp)
 }
 
 // IsInterop returns true if the Interop hardfork is active at or past the given timestamp.
 func (c *Config) IsInterop(timestamp uint64) bool {
-	return c.IsForkActive(Interop, timestamp)
+	return c.IsForkActive(forks.Interop, timestamp)
 }
 
 func (c *Config) IsRegolithActivationBlock(l2BlockTime uint64) bool {
@@ -552,6 +562,14 @@ func (c *Config) IsJovianActivationBlock(l2BlockTime uint64) bool {
 		!c.IsJovian(l2BlockTime-c.BlockTime)
 }
 
+// IsKarstActivationBlock returns whether the specified block is the first block subject to the
+// Karst upgrade.
+func (c *Config) IsKarstActivationBlock(l2BlockTime uint64) bool {
+	return c.IsKarst(l2BlockTime) &&
+		l2BlockTime >= c.BlockTime &&
+		!c.IsKarst(l2BlockTime-c.BlockTime)
+}
+
 func (c *Config) IsInteropActivationBlock(l2BlockTime uint64) bool {
 	return c.IsInterop(l2BlockTime) &&
 		l2BlockTime >= c.BlockTime &&
@@ -561,26 +579,33 @@ func (c *Config) IsInteropActivationBlock(l2BlockTime uint64) bool {
 func (c *Config) ActivationTime(fork ForkName) *uint64 {
 	// NEW FORKS MUST BE ADDED HERE
 	switch fork {
-	case Interop:
+	case forks.Interop:
 		return c.InteropTime
-	case Jovian:
+	case forks.Karst:
+		return c.KarstTime
+	case forks.Jovian:
 		return c.JovianTime
-	case Isthmus:
+	case forks.Isthmus:
 		return c.IsthmusTime
-	case Holocene:
+	case forks.Holocene:
 		return c.HoloceneTime
-	case Granite:
+	case forks.Granite:
 		return c.GraniteTime
-	case Fjord:
+	case forks.Fjord:
 		return c.FjordTime
-	case Ecotone:
+	case forks.Ecotone:
 		return c.EcotoneTime
-	case Delta:
+	case forks.Delta:
 		return c.DeltaTime
-	case Canyon:
+	case forks.Canyon:
 		return c.CanyonTime
-	case Regolith:
+	case forks.Regolith:
 		return c.RegolithTime
+
+	// Optional forks
+	case forks.PectraBlobSchedule:
+		return c.PectraBlobScheduleTime
+
 	default:
 		panic(fmt.Sprintf("unknown fork: %v", fork))
 	}
@@ -589,26 +614,33 @@ func (c *Config) ActivationTime(fork ForkName) *uint64 {
 func (c *Config) SetActivationTime(fork ForkName, timestamp *uint64) {
 	// NEW FORKS MUST BE ADDED HERE
 	switch fork {
-	case Interop:
+	case forks.Interop:
 		c.InteropTime = timestamp
-	case Jovian:
+	case forks.Karst:
+		c.KarstTime = timestamp
+	case forks.Jovian:
 		c.JovianTime = timestamp
-	case Isthmus:
+	case forks.Isthmus:
 		c.IsthmusTime = timestamp
-	case Holocene:
+	case forks.Holocene:
 		c.HoloceneTime = timestamp
-	case Granite:
+	case forks.Granite:
 		c.GraniteTime = timestamp
-	case Fjord:
+	case forks.Fjord:
 		c.FjordTime = timestamp
-	case Ecotone:
+	case forks.Ecotone:
 		c.EcotoneTime = timestamp
-	case Delta:
+	case forks.Delta:
 		c.DeltaTime = timestamp
-	case Canyon:
+	case forks.Canyon:
 		c.CanyonTime = timestamp
-	case Regolith:
+	case forks.Regolith:
 		c.RegolithTime = timestamp
+
+	// Optional forks
+	case forks.PectraBlobSchedule:
+		c.PectraBlobScheduleTime = timestamp
+
 	default:
 		panic(fmt.Sprintf("unknown fork: %v", fork))
 	}
@@ -623,7 +655,7 @@ func (c *Config) IsActivationBlock(oldTime, newTime uint64) ForkName {
 			return fork
 		}
 	}
-	return None
+	return forks.None
 }
 
 func (c *Config) IsActivationBlockForFork(l2BlockTime uint64, fork ForkName) bool {
@@ -638,17 +670,17 @@ func (c *Config) ActivateAtGenesis(hardfork ForkName) {
 	c.ActivateAt(hardfork, 0)
 }
 
-var scheduleableForks = ForksFrom(Regolith)
+var scheduleableForks = forks.From(forks.Regolith)
 
 // ActivateAt updates the config to activate the given fork at the given timestamp, all previous
 // forks at genesis, and all later forks are disabled.
 func (c *Config) ActivateAt(fork ForkName, timestamp uint64) {
-	if !IsValidFork(fork) {
+	if !forks.IsValid(fork) {
 		panic(fmt.Sprintf("invalid fork: %s", fork))
 	}
 	ts := new(uint64)
 	// Special case: if only activating Bedrock, all scheduleable forks are disabled.
-	if fork == Bedrock {
+	if fork == forks.Bedrock {
 		ts = nil
 	}
 	for i, f := range scheduleableForks {
@@ -831,6 +863,7 @@ func (c *Config) forEachFork(callback func(name string, logName string, time *ui
 	}
 	callback("Isthmus", "isthmus_time", c.IsthmusTime)
 	callback("Jovian", "jovian_time", c.JovianTime)
+	callback("Karst", "karst_time", c.KarstTime)
 	callback("Interop", "interop_time", c.InteropTime)
 }
 

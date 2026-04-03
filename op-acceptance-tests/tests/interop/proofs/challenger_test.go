@@ -16,7 +16,7 @@ import (
 
 func TestChallengerPlaysGame(gt *testing.T) {
 	t := devtest.ParallelT(gt)
-	sys := presets.NewSimpleInterop(t)
+	sys := presets.NewSimpleInteropSupernodeProofs(t, presets.WithChallengerCannonKonaEnabled())
 	dsl.CheckAll(t,
 		sys.L2CLA.AdvancedFn(types.CrossSafe, 1, 30),
 		sys.L2CLB.AdvancedFn(types.CrossSafe, 1, 30),
@@ -25,8 +25,7 @@ func TestChallengerPlaysGame(gt *testing.T) {
 	badClaim := common.HexToHash("0xdeadbeef00000000000000000000000000000000000000000000000000000000")
 	attacker := sys.FunderL1.NewFundedEOA(eth.Ether(15))
 	dgf := sys.DisputeGameFactory()
-
-	game := dgf.StartSuperCannonGame(attacker, proofs.WithRootClaim(badClaim))
+	game := dgf.StartSuperCannonKonaGame(attacker, proofs.WithSuperRootFrom(eth.Bytes32(badClaim), eth.Bytes32(badClaim)))
 
 	claim := game.RootClaim()                   // This is the bad claim from attacker
 	counterClaim := claim.WaitForCounterClaim() // This is the counter-claim from the challenger
@@ -38,9 +37,8 @@ func TestChallengerPlaysGame(gt *testing.T) {
 }
 
 func TestChallengerRespondsToMultipleInvalidClaims(gt *testing.T) {
-	gt.Skip("Skipping Interop Acceptance Test")
 	t := devtest.ParallelT(gt)
-	sys := presets.NewSimpleInterop(t)
+	sys := presets.NewSimpleInteropSupernodeProofs(t, presets.WithChallengerCannonKonaEnabled())
 	dsl.CheckAll(t,
 		sys.L2CLA.AdvancedFn(types.CrossSafe, 1, 30),
 		sys.L2CLB.AdvancedFn(types.CrossSafe, 1, 30),
@@ -49,7 +47,7 @@ func TestChallengerRespondsToMultipleInvalidClaims(gt *testing.T) {
 	attacker := sys.FunderL1.NewFundedEOA(eth.TenEther)
 	dgf := sys.DisputeGameFactory()
 
-	game := dgf.StartSuperCannonGame(attacker)
+	game := dgf.StartSuperCannonKonaGame(attacker)
 	claims := game.PerformMoves(attacker,
 		proofs.Move(0, common.Hash{0x01}, true),
 		proofs.Move(1, common.Hash{0x03}, true),
@@ -62,9 +60,8 @@ func TestChallengerRespondsToMultipleInvalidClaims(gt *testing.T) {
 }
 
 func TestChallengerRespondsToMultipleInvalidClaimsEOA(gt *testing.T) {
-	gt.Skip("Skipping Interop Acceptance Test")
 	t := devtest.ParallelT(gt)
-	sys := presets.NewSimpleInterop(t)
+	sys := presets.NewSimpleInteropSupernodeProofs(t, presets.WithChallengerCannonKonaEnabled())
 	dsl.CheckAll(t,
 		sys.L2CLA.AdvancedFn(types.CrossSafe, 1, 30),
 		sys.L2CLB.AdvancedFn(types.CrossSafe, 1, 30),
@@ -73,7 +70,7 @@ func TestChallengerRespondsToMultipleInvalidClaimsEOA(gt *testing.T) {
 	dgf := sys.DisputeGameFactory()
 	attacker := dgf.CreateHelperEOA(sys.FunderL1.NewFundedEOA(eth.TenEther))
 
-	game := dgf.StartSuperCannonGame(attacker.EOA)
+	game := dgf.StartSuperCannonKonaGame(attacker.EOA)
 	claims := attacker.PerformMoves(game.FaultDisputeGame,
 		proofs.Move(0, common.Hash{0x01}, true),
 		proofs.Move(1, common.Hash{0x03}, true),

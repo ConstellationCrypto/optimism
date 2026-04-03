@@ -4,6 +4,7 @@ import (
 	"math/rand"
 
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
+	"github.com/ethereum-optimism/optimism/op-core/forks"
 	e2ecfg "github.com/ethereum-optimism/optimism/op-e2e/config"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-program/client/boot"
@@ -48,7 +49,7 @@ func NewL2FaultProofEnv[c any](t helpers.Testing, testCfg *TestCfg[c], tp *e2eut
 		if testCfg.Hardfork == nil {
 			t.Fatalf("HF not set")
 		}
-		dp.DeployConfig.ActivateForkAtGenesis(rollup.ForkName(testCfg.Hardfork.Name))
+		dp.DeployConfig.ActivateForkAtGenesis(forks.Name(testCfg.Hardfork.Name))
 
 		for _, override := range deployConfigOverrides {
 			override(dp.DeployConfig)
@@ -152,6 +153,13 @@ func WithL1Head(head common.Hash) FixtureInputParam {
 	}
 }
 
+// WithL2RPCTracker sets the L2RPCTracker to observe L2 JSON-RPC calls made by the program host.
+func WithL2RPCTracker(tracker *L2RPCTracker) FixtureInputParam {
+	return func(f *FixtureInputs) {
+		f.L2RPCTracker = tracker
+	}
+}
+
 // RunFaultProofProgram runs the fault proof program for each state transition from genesis up to the provided l2 block num.
 func (env *L2FaultProofEnv) RunFaultProofProgramFromGenesis(t helpers.Testing, finalL2BlockNum uint64, checkResult CheckResult, fixtureInputParams ...FixtureInputParam) {
 	l2ClaimBlockNum := uint64(0)
@@ -242,15 +250,12 @@ func (env *L2FaultProofEnv) BatchAndMine(t helpers.Testing) {
 // Returns the L2 Safe Block Reference
 func (env *L2FaultProofEnv) BatchMineAndSync(t helpers.Testing) eth.L2BlockRef {
 	t.Helper()
-	id := env.Miner.UnsafeID()
 	env.BatchAndMine(t)
 	env.Sequencer.ActL1HeadSignal(t)
 	env.Sequencer.ActL2PipelineFull(t)
 
 	// Assertions
-
 	syncStatus := env.Sequencer.SyncStatus()
-	require.Equal(t, syncStatus.UnsafeL2.L1Origin, id, "UnsafeL2.L1Origin should equal L1 Unsafe ID before batch submitted")
 	require.Equal(t, syncStatus.UnsafeL2, syncStatus.SafeL2, "UnsafeL2 should equal SafeL2")
 
 	return syncStatus.SafeL2

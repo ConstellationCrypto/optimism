@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	gameTypes "github.com/ethereum-optimism/optimism/op-challenger/game/types"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/maps"
 
@@ -45,6 +46,7 @@ import (
 	batcherCfg "github.com/ethereum-optimism/optimism/op-batcher/config"
 	batcherFlags "github.com/ethereum-optimism/optimism/op-batcher/flags"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	shared "github.com/ethereum-optimism/optimism/op-devstack/shared/challenger"
 	"github.com/ethereum-optimism/optimism/op-e2e/config"
 	"github.com/ethereum-optimism/optimism/op-e2e/config/secrets"
@@ -74,7 +76,6 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/endpoint"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
-	"github.com/ethereum-optimism/optimism/op-service/predeploys"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
 	opsigner "github.com/ethereum-optimism/optimism/op-service/signer"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
@@ -115,7 +116,7 @@ func DefaultSystemConfig(t testing.TB, opts ...SystemConfigOpt) SystemConfig {
 
 	secrets := secrets.DefaultSecrets
 	deployConfig := config.DeployConfig(sco.AllocType)
-	require.Nil(t, deployConfig.L2GenesisJovianTimeOffset, "jovian not supported yet")
+	require.Nil(t, deployConfig.L2GenesisKarstTimeOffset, "karst not supported yet")
 	deployConfig.L1GenesisBlockTimestamp = hexutil.Uint64(time.Now().Unix())
 	e2eutils.ApplyDeployConfigForks(deployConfig)
 	require.NoError(t, deployConfig.Check(testlog.Logger(t, log.LevelInfo)),
@@ -208,6 +209,7 @@ func RegolithSystemConfig(t *testing.T, regolithTimeOffset *hexutil.Uint64, opts
 	cfg.DeployConfig.L2GenesisHoloceneTimeOffset = nil
 	cfg.DeployConfig.L2GenesisIsthmusTimeOffset = nil
 	cfg.DeployConfig.L2GenesisJovianTimeOffset = nil
+	cfg.DeployConfig.L2GenesisKarstTimeOffset = nil
 	// ADD NEW FORKS HERE!
 	return cfg
 }
@@ -260,6 +262,12 @@ func IsthmusSystemConfig(t *testing.T, isthmusTimeOffset *hexutil.Uint64, opts .
 func JovianSystemConfig(t *testing.T, jovianTimeOffset *hexutil.Uint64, opts ...SystemConfigOpt) SystemConfig {
 	cfg := IsthmusSystemConfig(t, &genesisTime, opts...)
 	cfg.DeployConfig.L2GenesisJovianTimeOffset = jovianTimeOffset
+	return cfg
+}
+
+func KarstSystemConfig(t *testing.T, karstTimeOffset *hexutil.Uint64, opts ...SystemConfigOpt) SystemConfig {
+	cfg := JovianSystemConfig(t, &genesisTime, opts...)
+	cfg.DeployConfig.L2GenesisKarstTimeOffset = karstTimeOffset
 	return cfg
 }
 
@@ -611,10 +619,10 @@ func (cfg SystemConfig) Start(t *testing.T, startOpts ...StartOption) (*System, 
 	// Automatically stop the system at the end of the test
 	t.Cleanup(sys.Close)
 
-	c := clock.SystemClock
+	clk := clock.SystemClock
 	if cfg.SupportL1TimeTravel {
 		sys.TimeTravelClock = clock.NewAdvancingClock(100 * time.Millisecond)
-		c = sys.TimeTravelClock
+		clk = sys.TimeTravelClock
 	}
 
 	if err := cfg.DeployConfig.Check(testlog.Logger(t, log.LevelInfo)); err != nil {
@@ -717,6 +725,7 @@ func (cfg SystemConfig) Start(t *testing.T, startOpts ...StartOption) (*System, 
 			PectraBlobScheduleTime:  cfg.DeployConfig.PectraBlobScheduleTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			IsthmusTime:             cfg.DeployConfig.IsthmusTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			JovianTime:              cfg.DeployConfig.JovianTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
+			KarstTime:               cfg.DeployConfig.KarstTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			InteropTime:             cfg.DeployConfig.InteropTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			ProtocolVersionsAddress: cfg.L1Deployments.ProtocolVersionsProxy,
 			AltDAConfig:             rollupAltDAConfig,
@@ -735,7 +744,7 @@ func (cfg SystemConfig) Start(t *testing.T, startOpts ...StartOption) (*System, 
 
 	// Create a fake Beacon node to hold on to blobs created by the L1 miner, and to serve them to L2
 	bcn := fakebeacon.NewBeacon(testlog.Logger(t, log.LevelInfo).New("role", "l1_cl"),
-		blobstore.New(), l1Genesis.Timestamp, cfg.DeployConfig.L1BlockTime, l1Genesis.Config.OsakaTime)
+		blobstore.New(), l1Genesis.Timestamp, cfg.DeployConfig.L1BlockTime)
 	t.Cleanup(func() {
 		_ = bcn.Close()
 	})
@@ -746,7 +755,7 @@ func (cfg SystemConfig) Start(t *testing.T, startOpts ...StartOption) (*System, 
 
 	// Initialize nodes
 	l1Geth, _, err := geth.InitL1(
-		cfg.DeployConfig.L1BlockTime, cfg.L1FinalizedDistance, l1Genesis, c,
+		cfg.DeployConfig.L1BlockTime, cfg.L1FinalizedDistance, l1Genesis, clk,
 		path.Join(cfg.BlobsPath, "l1_el"), bcn, cfg.GethOptions[RoleL1]...)
 	if err != nil {
 		return nil, err
@@ -886,7 +895,7 @@ func (cfg SystemConfig) Start(t *testing.T, startOpts ...StartOption) (*System, 
 		c.Rollup.LogDescription(cfg.Loggers[name], chaincfg.L2ChainIDToNetworkDisplayName)
 		l := cfg.Loggers[name]
 
-		n, err := opnode.NewOpnode(l, &c, func(err error) {
+		n, err := opnode.NewOpnode(l, &c, clk, func(err error) {
 			t.Error(err)
 		})
 		require.NoError(t, err)
@@ -925,35 +934,23 @@ func (cfg SystemConfig) Start(t *testing.T, startOpts ...StartOption) (*System, 
 	}
 
 	// L2Output Submitter
-	var proposerCLIConfig *l2os.CLIConfig
-	if cfg.AllocType.UsesProofs() {
-		proposerCLIConfig = &l2os.CLIConfig{
-			L1EthRpc:          sys.EthInstances[RoleL1].UserRPC().RPC(),
-			RollupRpc:         sys.RollupNodes[RoleSeq].UserRPC().RPC(),
-			DGFAddress:        config.L1Deployments(cfg.AllocType).DisputeGameFactoryProxy.Hex(),
-			ProposalInterval:  6 * time.Second,
-			DisputeGameType:   254, // Fast game type
-			PollInterval:      500 * time.Millisecond,
-			TxMgrConfig:       setuputils.NewTxMgrConfig(sys.EthInstances[RoleL1].UserRPC(), cfg.Secrets.Proposer),
-			AllowNonFinalized: cfg.NonFinalizedProposals,
-			LogConfig: oplog.CLIConfig{
-				Level:  log.LvlInfo,
-				Format: oplog.FormatText,
-			},
-		}
-	} else {
-		proposerCLIConfig = &l2os.CLIConfig{
-			L1EthRpc:          sys.EthInstances[RoleL1].UserRPC().RPC(),
-			RollupRpc:         sys.RollupNodes[RoleSeq].UserRPC().RPC(),
-			L2OOAddress:       config.L1Deployments(cfg.AllocType).L2OutputOracleProxy.Hex(),
-			PollInterval:      500 * time.Millisecond,
-			TxMgrConfig:       setuputils.NewTxMgrConfig(sys.EthInstances[RoleL1].UserRPC(), cfg.Secrets.Proposer),
-			AllowNonFinalized: cfg.NonFinalizedProposals,
-			LogConfig: oplog.CLIConfig{
-				Level:  log.LvlInfo,
-				Format: oplog.FormatText,
-			},
-		}
+	respectedGameType := gameTypes.PermissionedGameType
+	if cfg.AllocType == config.AllocTypeFastGame {
+		respectedGameType = gameTypes.FastGameType
+	}
+	proposerCLIConfig := &l2os.CLIConfig{
+		L1EthRpc:          sys.EthInstances[RoleL1].UserRPC().RPC(),
+		RollupRpc:         sys.RollupNodes[RoleSeq].UserRPC().RPC(),
+		DGFAddress:        config.L1Deployments(cfg.AllocType).DisputeGameFactoryProxy.Hex(),
+		ProposalInterval:  6 * time.Second,
+		DisputeGameType:   uint32(respectedGameType),
+		PollInterval:      500 * time.Millisecond,
+		TxMgrConfig:       setuputils.NewTxMgrConfig(sys.EthInstances[RoleL1].UserRPC(), cfg.Secrets.Proposer),
+		AllowNonFinalized: cfg.NonFinalizedProposals,
+		LogConfig: oplog.CLIConfig{
+			Level:  log.LvlInfo,
+			Format: oplog.FormatText,
+		},
 	}
 	proposer, err := l2os.ProposerServiceFromCLIConfig(context.Background(), "0.0.1", proposerCLIConfig, sys.Cfg.Loggers["proposer"])
 	if err != nil {
@@ -1025,7 +1022,12 @@ func (cfg SystemConfig) Start(t *testing.T, startOpts ...StartOption) (*System, 
 	}
 
 	// Batch Submitter
-	batcher, err := bss.BatcherServiceFromCLIConfig(context.Background(), "0.0.1", batcherCLIConfig, sys.Cfg.Loggers["batcher"])
+	batcherContext, batcherCancel := context.WithCancel(context.Background())
+	var closeAppFn context.CancelCauseFunc = func(cause error) {
+		t.Fatalf("closeAppFn called, batcher hit a critical error: %v", cause)
+		batcherCancel()
+	}
+	batcher, err := bss.BatcherServiceFromCLIConfig(batcherContext, closeAppFn, "0.0.1", batcherCLIConfig, sys.Cfg.Loggers["batcher"])
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup batch submitter: %w", err)
 	}

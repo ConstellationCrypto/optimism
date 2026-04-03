@@ -26,11 +26,11 @@ func TestSubProcess(gt *testing.T) {
 	p := devtest.NewP(context.Background(), logger, onFailNow, onSkipNow)
 	gt.Cleanup(p.Close)
 
-	logProc := logpipe.LogProcessor(func(line []byte) {
+	logCallback := logpipe.LogCallback(func(line []byte) {
 		logger.Info(string(line))
 		tLog.Info("Sub-process logged message", "line", string(line))
 	})
-	sp := NewSubProcess(p, logProc, logProc)
+	sp := NewSubProcess(p, logCallback, logCallback)
 
 	gt.Log("Running first sub-process")
 	testSleep(gt, capt, sp)
@@ -49,8 +49,7 @@ func TestSubProcess(gt *testing.T) {
 func testEcho(gt *testing.T, capt *testlog.CapturingHandler, sp *SubProcess) {
 	require.NoError(gt, sp.Start("/bin/echo", []string{"hello world"}, []string{}))
 	gt.Log("Started sub-process")
-	require.NoError(gt, sp.Wait(context.Background()), "echo must complete")
-	require.NoError(gt, sp.Stop())
+	require.NoError(gt, sp.Stop(false))
 	gt.Log("Stopped sub-process")
 
 	require.NotNil(gt, capt.FindLog(
@@ -66,12 +65,12 @@ func testSleep(gt *testing.T, capt *testlog.CapturingHandler, sp *SubProcess) {
 	require.NoError(gt, sp.Start("/bin/sleep", []string{"10000000000"}, []string{}))
 	gt.Log("Started sub-process")
 	// Shut down the process before the sleep completes
-	require.NoError(gt, sp.Kill())
+	require.NoError(gt, sp.Stop(true))
 	gt.Log("Killed sub-process")
 
 	require.NotNil(gt, capt.FindLog(
-		testlog.NewMessageFilter("Sub-process did not respond to interrupt, force-closing now")))
+		testlog.NewMessageFilter("Sending interrupt")))
 
 	require.NotNil(gt, capt.FindLog(
-		testlog.NewMessageFilter("Successfully force-closed sub-process")))
+		testlog.NewMessageFilter("Sub-process gracefully exited")))
 }

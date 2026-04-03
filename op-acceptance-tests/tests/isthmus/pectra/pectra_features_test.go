@@ -6,10 +6,11 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/ethereum-optimism/optimism/op-core/forks"
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
 	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
 	"github.com/ethereum-optimism/optimism/op-devstack/presets"
-	"github.com/ethereum-optimism/optimism/op-node/rollup"
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/txplan"
 	"github.com/ethereum/go-ethereum/common"
@@ -26,14 +27,30 @@ const (
 	CALLDATA_COST_INCREASE
 )
 
+type testSystem struct {
+	FunderL2 *dsl.Funder
+	L2EL     *dsl.L2ELNode
+	L2Chain  *dsl.L2Network
+}
+
+func newSystem(t devtest.T) *testSystem {
+	preset := presets.NewMinimal(t)
+	l2 := preset.L2Chain
+	t.Require().True(l2.IsForkActive(forks.Isthmus), "Isthmus fork must be active for Pectra features")
+
+	l2EL := l2.ArchiveEL()
+	wallet := dsl.NewRandomHDWallet(t, 30)
+
+	return &testSystem{
+		FunderL2: dsl.NewFunder(wallet, preset.FaucetL2, l2EL),
+		L2EL:     l2EL,
+		L2Chain:  l2,
+	}
+}
+
 func TestPectra(gt *testing.T) {
 	t := devtest.SerialT(gt)
-	sys := presets.NewMinimal(t)
-	require := t.Require()
-
-	err := dsl.RequiresL2Fork(t.Ctx(), sys, 0, rollup.Isthmus)
-	require.NoError(err, "Isthmus fork must be active for Pectra features")
-
+	sys := newSystem(t)
 	alice := sys.FunderL2.NewFundedEOA(eth.OneTenthEther)
 
 	cases := []struct {
@@ -53,7 +70,7 @@ func TestPectra(gt *testing.T) {
 	}
 }
 
-func runPectraFeatureTest(t devtest.T, sys *presets.Minimal, alice *dsl.EOA, testVector uint64) {
+func runPectraFeatureTest(t devtest.T, sys *testSystem, alice *dsl.EOA, testVector uint64) {
 	require := t.Require()
 
 	switch testVector {
@@ -70,7 +87,7 @@ func runPectraFeatureTest(t devtest.T, sys *presets.Minimal, alice *dsl.EOA, tes
 	}
 }
 
-func runSetCodeTxBasicTest(t devtest.T, alice *dsl.EOA, sys *presets.Minimal) {
+func runSetCodeTxBasicTest(t devtest.T, alice *dsl.EOA, sys *testSystem) {
 	require := t.Require()
 
 	// ================================
@@ -266,7 +283,7 @@ func deployProgram(t devtest.T, user *dsl.EOA, bytecode []byte) common.Address {
 	t.Logf("Deployment receipt: Status=%d, GasUsed=%d, CumulativeGasUsed=%d",
 		receipt.Status, receipt.GasUsed, receipt.CumulativeGasUsed)
 	t.Logf("Deployment transaction: BlockNumber=%d, TransactionIndex=%d",
-		receipt.BlockNumber.Uint64(), receipt.TransactionIndex)
+		bigs.Uint64Strict(receipt.BlockNumber), receipt.TransactionIndex)
 
 	require.Equal(uint64(1), receipt.Status, "Contract deployment failed")
 	require.NotNil(receipt.ContractAddress, "Contract address not set in receipt")

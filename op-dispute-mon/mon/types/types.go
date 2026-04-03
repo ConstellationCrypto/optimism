@@ -13,7 +13,25 @@ import (
 
 // outputRootGameTypes lists the set of legacy game types that use output roots
 // It is assumed that all other game types use super roots
-var outputRootGameTypes = []uint32{0, 1, 2, 3, 6, 254, 255, 1337}
+var outputRootGameTypes = []types.GameType{
+	types.CannonGameType,
+	types.PermissionedGameType,
+	types.AsteriscGameType,
+	types.AsteriscKonaGameType,
+	types.OPSuccinctGameType,
+	types.CannonKonaGameType,
+	types.OptimisticZKGameType,
+	types.FastGameType,
+	types.AlphabetGameType,
+	types.KailuaGameType,
+}
+
+var superRootGameTypes = []types.GameType{
+	types.SuperCannonGameType,
+	types.SuperPermissionedGameType,
+	types.SuperAsteriscKonaGameType,
+	types.SuperCannonKonaGameType,
+}
 
 // EnrichedClaim extends the faultTypes.Claim with additional context.
 type EnrichedClaim struct {
@@ -26,7 +44,7 @@ type EnrichedGameData struct {
 	LastUpdateTime        time.Time
 	L1Head                common.Hash
 	L1HeadNum             uint64
-	L2BlockNumber         uint64
+	L2SequenceNumber      uint64
 	RootClaim             common.Hash
 	Status                types.GameStatus
 	MaxClockDuration      uint64
@@ -59,11 +77,53 @@ type EnrichedGameData struct {
 	// This ETH balance will be used to pay out any bonds required by the games
 	// that use the same DelayedWETH contract.
 	ETHCollateral *big.Int
+
+	// NodeEndpointErrors stores endpoint IDs that returned errors other than "not found" for this game.
+	NodeEndpointErrors map[string]bool
+
+	// NodeEndpointErrorCount tracks the total number of errors for this game across all endpoints.
+	NodeEndpointErrorCount int
+
+	// NodeEndpointNotFoundCount tracks the number of endpoints that returned "not found" for this game.
+	NodeEndpointNotFoundCount int
+
+	// NodeEndpointOutOfSyncCount tracks the number of endpoints that were out of sync for this game.
+	NodeEndpointOutOfSyncCount int
+
+	// NodeEndpointTotalCount tracks the total number of endpoints attempted for this game.
+	NodeEndpointTotalCount int
+
+	// NodeEndpointSafeCount tracks the number of endpoints that reported the root as safe.
+	NodeEndpointSafeCount int
+
+	// NodeEndpointUnsafeCount tracks the number of endpoints that reported the root as unsafe.
+	NodeEndpointUnsafeCount int
+
+	// NodeEndpointDifferentRoots tracks whether endpoints returned different roots for this game.
+	// For output root games, this means different output roots. For super root games, different super roots.
+	NodeEndpointDifferentRoots bool
 }
 
 // UsesOutputRoots returns true if the game type is one of the known types that use output roots as proposals.
 func (g EnrichedGameData) UsesOutputRoots() bool {
-	return slices.Contains(outputRootGameTypes, g.GameType)
+	return slices.Contains(outputRootGameTypes, types.GameType(g.GameType))
+}
+
+// HasMixedAvailability returns true if some endpoints returned "not found" while others succeeded
+// for this game. This indicates inconsistent block availability across the node network.
+func (g EnrichedGameData) HasMixedAvailability() bool {
+	if g.NodeEndpointTotalCount == 0 {
+		return false
+	}
+
+	successfulEndpoints := g.NodeEndpointTotalCount - g.NodeEndpointErrorCount - g.NodeEndpointNotFoundCount
+	return g.NodeEndpointNotFoundCount > 0 && successfulEndpoints > 0
+}
+
+// HasMixedSafety returns true if some endpoints reported the root as safe and others as unsafe
+// for this game. This indicates inconsistent safety assessment across the node network.
+func (g EnrichedGameData) HasMixedSafety() bool {
+	return g.NodeEndpointSafeCount > 0 && g.NodeEndpointUnsafeCount > 0
 }
 
 // BidirectionalTree is a tree of claims represented as a flat list of claims.

@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching/rpcblock"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
@@ -94,7 +95,7 @@ func (f *DisputeGameFactory) HasProposedSince(ctx context.Context, proposer comm
 	}
 }
 
-func (f *DisputeGameFactory) ProposalTx(ctx context.Context, gameType uint32, outputRoot common.Hash, l2BlockNum uint64) (txmgr.TxCandidate, error) {
+func (f *DisputeGameFactory) ProposalTx(ctx context.Context, gameType uint32, outputRoot common.Hash, extraData []byte) (txmgr.TxCandidate, error) {
 	cCtx, cancel := context.WithTimeout(ctx, f.networkTimeout)
 	defer cancel()
 	result, err := f.caller.SingleCall(cCtx, rpcblock.Latest, f.contract.Call(methodInitBonds, gameType))
@@ -102,7 +103,7 @@ func (f *DisputeGameFactory) ProposalTx(ctx context.Context, gameType uint32, ou
 		return txmgr.TxCandidate{}, fmt.Errorf("failed to fetch init bond: %w", err)
 	}
 	initBond := result.GetBigInt(0)
-	call := f.contract.Call(methodCreateGame, gameType, outputRoot, common.BigToHash(big.NewInt(int64(l2BlockNum))).Bytes())
+	call := f.contract.Call(methodCreateGame, gameType, outputRoot, extraData)
 	candidate, err := call.ToTxCandidate()
 	if err != nil {
 		return txmgr.TxCandidate{}, err
@@ -118,7 +119,7 @@ func (f *DisputeGameFactory) gameCount(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to load game count: %w", err)
 	}
-	return result.GetBigInt(0).Uint64(), nil
+	return bigs.Uint64Strict(result.GetBigInt(0)), nil
 }
 
 func (f *DisputeGameFactory) gameAtIndex(ctx context.Context, idx uint64) (gameMetadata, error) {

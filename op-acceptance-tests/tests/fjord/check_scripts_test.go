@@ -7,16 +7,17 @@ import (
 
 	"github.com/ethereum/go-ethereum/rpc"
 
+	"github.com/ethereum-optimism/optimism/op-core/forks"
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
 	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
 	"github.com/ethereum-optimism/optimism/op-devstack/presets"
-	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
-	"github.com/ethereum-optimism/optimism/op-service/predeploys"
 	txib "github.com/ethereum-optimism/optimism/op-service/txintent/bindings"
 	"github.com/ethereum-optimism/optimism/op-service/txintent/contractio"
 	"github.com/ethereum-optimism/optimism/op-service/txplan"
 
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -34,8 +35,7 @@ func TestCheckFjordScript(gt *testing.T) {
 	require := t.Require()
 	ctx := t.Ctx()
 
-	err := dsl.RequiresL2Fork(ctx, sys, 0, rollup.Fjord)
-	require.NoError(err)
+	require.True(sys.L2Chain.IsForkActive(forks.Fjord))
 
 	wallet := sys.FunderL2.NewFundedEOA(eth.OneThirdEther)
 
@@ -165,7 +165,7 @@ func checkFastLZTransactions(t devtest.T, ctx context.Context, sys *presets.Mini
 		fastLzSize := uint64(types.FlzCompressLen(txUnsigned) + 68)
 		gethGPOFee, err := dsl.CalculateFjordL1Cost(ctx, l2Client, types.RollupCostData{FastLzSize: fastLzSize}, receipt.BlockHash)
 		require.NoError(err)
-		require.Equalf(gethGPOFee.Uint64(), gpoFee.Uint64(), "GPO L1 fee mismatch (expected=%d actual=%d)", gethGPOFee.Uint64(), gpoFee.Uint64())
+		require.Equalf(bigs.Uint64Strict(gethGPOFee), bigs.Uint64Strict(gpoFee), "GPO L1 fee mismatch (expected=%v actual=%v)", gethGPOFee, gpoFee)
 
 		expectedFee, err := dsl.CalculateFjordL1Cost(ctx, l2Client, signedTx.RollupCostData(), receipt.BlockHash)
 		require.NoError(err)
@@ -178,7 +178,7 @@ func checkFastLZTransactions(t devtest.T, ctx context.Context, sys *presets.Mini
 		flzUpperBound := uint64(txLenGPO + txLenGPO/255 + 16)
 		upperBoundCost, err := dsl.CalculateFjordL1Cost(ctx, l2Client, types.RollupCostData{FastLzSize: flzUpperBound}, receipt.BlockHash)
 		require.NoError(err)
-		require.Equalf(upperBoundCost.Uint64(), upperBound.Uint64(), "GPO L1 upper bound mismatch (expected=%d actual=%d)", upperBoundCost.Uint64(), upperBound.Uint64())
+		require.Equalf(bigs.Uint64Strict(upperBoundCost), bigs.Uint64Strict(upperBound), "GPO L1 upper bound mismatch (expected=%v actual=%v)", upperBoundCost, upperBound)
 
 		_, err = contractio.Read(gasPriceOracle.BaseFeeScalar(), ctx)
 		require.NoError(err)

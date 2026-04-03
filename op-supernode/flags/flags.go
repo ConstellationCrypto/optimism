@@ -45,6 +45,13 @@ var (
 		EnvVars:  prefixEnvVars("L1_BEACON"),
 		Required: false,
 	}
+	DisableP2P = &cli.BoolFlag{
+		Name:     "disable-p2p",
+		Usage:    "Disable P2P for all chains. Affects configuration handed to virtual nodes.",
+		EnvVars:  prefixEnvVars("DISABLE_P2P"),
+		Value:    false,
+		Required: false,
+	}
 )
 
 var requiredFlags = []cli.Flag{
@@ -52,7 +59,19 @@ var requiredFlags = []cli.Flag{
 	L1NodeAddr,
 }
 
-var optionalFlags []cli.Flag
+var optionalFlags = []cli.Flag{
+	DisableP2P,
+}
+
+// activityFlags holds flags registered by activity packages via RegisterActivityFlags.
+// Activities call this during their init() to register their own CLI flags.
+var activityFlags []cli.Flag
+
+// RegisterActivityFlags allows activity packages to register their CLI flags.
+// This should be called from an activity's init() function.
+func RegisterActivityFlags(flags ...cli.Flag) {
+	activityFlags = append(activityFlags, flags...)
+}
 
 func init() {
 	optionalFlags = append(optionalFlags, L1BeaconAddr)
@@ -87,15 +106,18 @@ func FullDynamicFlags(chains []uint64) []cli.Flag {
 	for _, f := range opnodeflags.Flags {
 		baseName := f.Names()[0]
 		// vn.all.* env var/alias prefixing
-		allEnvs := prefixEnvVar(f, "VN_ALL_")
+		allEnvs := upgradeEnvVarPrefixes(f, opnodeflags.EnvVarPrefix, "VN_ALL")
 		allAliases := prefixAliases(f, VNFlagGlobalPrefix)
 		final = append(final, renameFlagWithEnv(f, VNFlagGlobalPrefix+baseName, allEnvs, allAliases))
 		// per-chain
 		for _, id := range chains {
-			perChainEnvs := prefixEnvVar(f, fmt.Sprintf("VN_%d_", id))
+			perChainEnvs := upgradeEnvVarPrefixes(f, opnodeflags.EnvVarPrefix, fmt.Sprintf("VN_%d", id))
 			perAliases := prefixAliases(f, fmt.Sprintf("%s%d.", VNFlagNamePrefix, id))
 			final = append(final, renameFlagWithEnv(f, fmt.Sprintf("%s%d.%s", VNFlagNamePrefix, id, baseName), perChainEnvs, perAliases))
 		}
 	}
+
+	// add the activity flags that were registered by activities during their init() functions
+	final = append(final, activityFlags...)
 	return final
 }

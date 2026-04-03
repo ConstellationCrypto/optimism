@@ -4,19 +4,20 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
+	"github.com/ethereum-optimism/optimism/op-core/forks"
 	actionsHelpers "github.com/ethereum-optimism/optimism/op-e2e/actions/helpers"
 	"github.com/ethereum-optimism/optimism/op-e2e/actions/proofs/helpers"
-	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
 type activationBlockTestCfg struct {
-	fork          rollup.ForkName
+	fork          forks.Name
 	numUpgradeTxs int
 }
 
@@ -26,8 +27,8 @@ func TestActivationBlockTxOmission(gt *testing.T) {
 	matrix := helpers.NewMatrix[activationBlockTestCfg]()
 
 	matrix.AddDefaultTestCasesWithName(
-		string(rollup.Jovian),
-		activationBlockTestCfg{fork: rollup.Jovian, numUpgradeTxs: 5},
+		string(forks.Jovian),
+		activationBlockTestCfg{fork: forks.Jovian, numUpgradeTxs: 5},
 		helpers.NewForkMatrix(helpers.Isthmus),
 		testActivationBlockTxOmission,
 	)
@@ -98,5 +99,5 @@ func testActivationBlockTxOmission(gt *testing.T, testCfg *helpers.TestCfg[activ
 	preActHeader := engine.L2Chain().GetHeaderByHash(actHeader.ParentHash)
 	require.Equal(t, eth.HeaderBlockID(preActHeader), eth.HeaderBlockID(l2SafeHead), "derivation only reaches pre-upgrade block")
 
-	env.RunFaultProofProgramFromGenesis(t, l2SafeHead.Number.Uint64(), testCfg.CheckResult, testCfg.InputParams...)
+	env.RunFaultProofProgramFromGenesis(t, bigs.Uint64Strict(l2SafeHead.Number), testCfg.CheckResult, testCfg.InputParams...)
 }

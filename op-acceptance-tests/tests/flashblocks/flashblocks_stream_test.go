@@ -1,21 +1,18 @@
-//go:build !ci
-
-// use a tag prefixed with "!". Such tag ensures that the default behaviour of this test would be to be built/run even when the go toolchain (go test) doesn't specify any tag filter.
 package flashblocks
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
-	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
 	"github.com/ethereum-optimism/optimism/op-devstack/presets"
-	"github.com/ethereum-optimism/optimism/op-service/testlog"
+	"github.com/ethereum-optimism/optimism/op-service/log/logfilter"
+	"github.com/ethereum-optimism/optimism/op-service/logmods"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
@@ -25,14 +22,20 @@ var (
 	maxExpectedFlashblocks = 20
 )
 
-// TestFlashblocksStream checks we can connect to the flashblocks stream
+// TestFlashblocksStream checks we can connect to the flashblocks stream across multiple CL backends.
 func TestFlashblocksStream(gt *testing.T) {
 	t := devtest.SerialT(gt)
-	sys := presets.NewSimpleFlashblocks(t)
-	logger := testlog.Logger(t, log.LevelInfo).With("Test", "TestFlashblocksStream")
+	logger := t.Logger()
+	sys := presets.NewSingleChainWithFlashblocks(t)
+	filterHandler, ok := logmods.FindHandler[logfilter.FilterHandler](logger.Handler())
+	if ok {
+		filterHandler.Set(logfilter.DefaultMute(
+			logfilter.Level(slog.LevelError).Show(),
+			logfilter.Select("kind", "L2CLNode").Show(),
+		))
+	}
 	tracer := t.Tracer()
 	ctx := t.Ctx()
-	logger.Info("Started Flashblocks Stream test")
 
 	ctx, span := tracer.Start(ctx, "test chains")
 	defer span.End()
@@ -50,34 +53,66 @@ func TestFlashblocksStream(gt *testing.T) {
 
 	logger.Info("Flashblocks stream rate", "rate", flashblocksStreamRateMs)
 
-	// Test all L2 chains in the system
-	for l2Chain, flashblocksBuilderSet := range sys.FlashblocksBuilderSets {
-		_, span = tracer.Start(ctx, "test chain")
-		defer span.End()
+	oprbuilderNode := sys.L2OPRBuilder
+	rollupBoostNode := sys.L2RollupBoost
+	_, span = tracer.Start(ctx, "test chain")
+	defer span.End()
 
-		networkName := l2Chain.String()
-		t.Run(fmt.Sprintf("L2_Chain_%s", networkName), func(tt devtest.T) {
-			if len(flashblocksBuilderSet) == 0 {
-				tt.Skip("no flashblocks builders for chain", l2Chain.String())
-			}
+	expectedChainID := sys.L2Chain.ChainID().ToBig()
+	require.Equal(t, oprbuilderNode.Escape().ChainID().ToBig(), expectedChainID, "flashblocks builder node chain id should match expected chain id")
 
-			expectedChainID := l2Chain.ChainID().ToBig()
-			for _, flashblocksBuilderNode := range flashblocksBuilderSet {
-				require.Equal(t, flashblocksBuilderNode.Escape().ChainID().ToBig(), expectedChainID, "flashblocks builder node chain id should match expected chain id")
+	DriveViaTestSequencer(t, sys, 3)
 
-				mode := FlashblocksStreamMode_Follower
-				if dsl.NewConductor(flashblocksBuilderNode.Escape().Conductor()).IsLeader() {
-					mode = FlashblocksStreamMode_Leader
-				}
+	testDuration := time.Duration(int64(flashblocksStreamRateMs*maxExpectedFlashblocks*2)) * time.Millisecond
+	failureTolerance := int(0.15 * float64(maxExpectedFlashblocks))
 
-				testFlashblocksStreamRbuilder(tt, logger, flashblocksBuilderNode, mode, flashblocksStreamRateMs)
-			}
+	logger.Debug("Test duration", "duration", testDuration, "failure tolerance (of flashblocks)", failureTolerance)
 
-			for _, flashblocksWebsocketProxy := range sys.FlashblocksWebsocketProxies[l2Chain] {
-				testFlashblocksStreamFbWsProxy(tt, logger, flashblocksWebsocketProxy, flashblocksStreamRateMs)
-			}
-		})
+	builderOutput := make(chan []byte, maxExpectedFlashblocks)
+	defer close(builderOutput)
+	builderDone := make(chan struct{})
+	go func() {
+		err := oprbuilderNode.FlashblocksClient().ReadAll(ctx, logger.With("stream_source", "op-rbuilder"), testDuration, builderOutput, builderDone)
+		require.NoError(t, err)
+	}()
+	builderMessages := make([]string, 0)
+
+	output := make(chan []byte, maxExpectedFlashblocks)
+	defer close(output)
+	doneListening := make(chan struct{})
+	streamedMessages := make([]string, 0)
+	go func() {
+		err := rollupBoostNode.FlashblocksClient().ReadAll(ctx, logger.With("stream_source", "rollup-boost"), testDuration, output, doneListening)
+		require.NoError(t, err)
+	}()
+
+	listening := true
+	for listening {
+		select {
+		case <-doneListening:
+			doneListening = nil
+		case <-builderDone:
+			builderDone = nil
+		case msg := <-output:
+			streamedMessages = append(streamedMessages, string(msg))
+		case msg := <-builderOutput:
+			builderMessages = append(builderMessages, string(msg))
+		}
+
+		if doneListening == nil && builderDone == nil {
+			listening = false
+		}
 	}
+
+	logger.Info("Completed WebSocket stream reading", "msg_count", len(streamedMessages), "builder_msg_count", len(builderMessages))
+
+	if len(builderMessages) > 0 {
+		logger.Info("Sample builder message", "payload", builderMessages[0])
+	}
+
+	totalFlashblocksProduced := evaluateFlashblocksStream(t, logger, streamedMessages, failureTolerance)
+	require.Greater(t, totalFlashblocksProduced, 0, "expected to receive flashblocks from rollup-boost stream")
+	logger.Info("Flashblocks stream validation completed", "total_flashblocks_produced", totalFlashblocksProduced)
 }
 
 func evaluateFlashblocksStream(t devtest.T, logger log.Logger, streamedMessages []string, failureTolerance int) int {
@@ -118,13 +153,12 @@ func evaluateFlashblocksStream(t devtest.T, logger log.Logger, streamedMessages 
 		require.Greater(t, lastIndex, -1, "some bug: last index should be greater than -1 by now")
 		require.Greater(t, currentIndex, -1, "some bug: current index should be greater than -1 by now")
 
-		// same block number, just the flashblock incremented
 		if currentBlockNumber == lastBlockNumber {
 			require.Greater(t, currentIndex, lastIndex, "some bug: current index should be greater than last index from the stream")
 
 			totalFlashblocksProduced += (currentIndex - lastIndex)
-		} else if currentBlockNumber > lastBlockNumber { // new block number
-			totalFlashblocksProduced += (currentIndex + 1) // assuming it's a new block number whose flashblocks begin from 0th-index
+		} else if currentBlockNumber > lastBlockNumber {
+			totalFlashblocksProduced += (currentIndex + 1)
 		}
 
 		lastIndex = currentIndex
@@ -132,103 +166,4 @@ func evaluateFlashblocksStream(t devtest.T, logger log.Logger, streamedMessages 
 	}
 
 	return totalFlashblocksProduced
-}
-
-// testFlashblocksStreamRbuilder tests the presence / absence of a flashblocks stream operating at a 250ms (configurable via env var FLASHBLOCKS_STREAM_RATE) rate from an rbuilder node
-func testFlashblocksStreamRbuilder(t devtest.T, logger log.Logger, flashblocksBuilderNode *dsl.FlashblocksBuilderNode, mode FlashblocksStreamMode, expectedFlashblocksStreamRateMs int) {
-	t.Run(fmt.Sprintf("Flashblocks_Stream_Rbuilder_%s_%s", flashblocksBuilderNode.Escape().ID(), mode), func(t devtest.T) {
-		testDuration := time.Duration(int64(expectedFlashblocksStreamRateMs*maxExpectedFlashblocks)) * time.Millisecond
-		failureTolerance := int(0.15 * float64(maxExpectedFlashblocks))
-
-		logger.Debug("Test duration", "duration", testDuration, "failure tolerance (of flashblocks)", failureTolerance)
-
-		require.Contains(t, []FlashblocksStreamMode{FlashblocksStreamMode_Leader, FlashblocksStreamMode_Follower}, mode, "mode should be either leader or follower")
-		require.NotNil(t, flashblocksBuilderNode, "flashblocksBuilderNode should not be nil")
-
-		output := make(chan []byte, maxExpectedFlashblocks)
-		doneListening := make(chan struct{})
-		streamedMessages := make([]string, 0)
-		go flashblocksBuilderNode.ListenFor(logger, testDuration, output, doneListening) //nolint:errcheck
-
-		for {
-			select {
-			case <-doneListening:
-				goto done
-			case msg := <-output:
-				streamedMessages = append(streamedMessages, string(msg))
-			}
-		}
-	done:
-
-		defer close(output)
-
-		logger.Info("Completed WebSocket stream reading", "message_count", len(streamedMessages))
-		if mode == FlashblocksStreamMode_Follower {
-			require.Equal(t, len(streamedMessages), 0, "follower should not receive any messages")
-			return
-		}
-
-		totalFlashblocksProduced := evaluateFlashblocksStream(t, logger, streamedMessages, failureTolerance)
-
-		minExpectedFlashblocks := maxExpectedFlashblocks - failureTolerance
-		require.Greater(t,
-			totalFlashblocksProduced, minExpectedFlashblocks,
-			fmt.Sprintf("total flashblocks produced should be greater than %d (%d over %s with a %dms rate with a failure tolerance of %d flashblocks)",
-				minExpectedFlashblocks,
-				maxExpectedFlashblocks,
-				testDuration,
-				expectedFlashblocksStreamRateMs,
-				failureTolerance,
-			),
-		)
-
-		logger.Info("Flashblocks stream validation completed", "total_flashblocks_produced", totalFlashblocksProduced)
-	})
-}
-
-// testFlashblocksStreamFbWsProxy tests the presence / absence of a flashblocks stream operating at a 250ms (configurable via env var FLASHBLOCKS_STREAM_RATE) rate from a flashblocks-websocket-proxy node
-func testFlashblocksStreamFbWsProxy(t devtest.T, logger log.Logger, flashblocksWebsocketProxy *dsl.FlashblocksWebsocketProxy, expectedFlashblocksStreamRateMs int) {
-	t.Run(fmt.Sprintf("Flashblocks_Stream_FbWsProxy_%s", flashblocksWebsocketProxy.Escape().ID()), func(t devtest.T) {
-		testDuration := time.Duration(int64(expectedFlashblocksStreamRateMs*maxExpectedFlashblocks)) * time.Millisecond
-		failureTolerance := int(0.15 * float64(maxExpectedFlashblocks))
-
-		logger.Debug("Test duration", "duration", testDuration, "failure tolerance (of flashblocks)", failureTolerance)
-
-		require.NotNil(t, flashblocksWebsocketProxy, "flashblocksWebsocketProxy should not be nil")
-
-		output := make(chan []byte, maxExpectedFlashblocks)
-		doneListening := make(chan struct{})
-		streamedMessages := make([]string, 0)
-		go flashblocksWebsocketProxy.ListenFor(logger, testDuration, output, doneListening) //nolint:errcheck
-
-		for {
-			select {
-			case <-doneListening:
-				goto done
-			case msg := <-output:
-				streamedMessages = append(streamedMessages, string(msg))
-			}
-		}
-	done:
-
-		defer close(output)
-
-		logger.Info("Completed WebSocket stream reading", "message_count", len(streamedMessages))
-
-		totalFlashblocksProduced := evaluateFlashblocksStream(t, logger, streamedMessages, failureTolerance)
-
-		minExpectedFlashblocks := maxExpectedFlashblocks - failureTolerance
-		require.Greater(t,
-			totalFlashblocksProduced, minExpectedFlashblocks,
-			fmt.Sprintf("total flashblocks produced should be greater than %d (%d over %s with a %dms rate with a failure tolerance of %d flashblocks)",
-				minExpectedFlashblocks,
-				maxExpectedFlashblocks,
-				testDuration,
-				expectedFlashblocksStreamRateMs,
-				failureTolerance,
-			),
-		)
-
-		logger.Info("Flashblocks stream validation completed", "total_flashblocks_produced", totalFlashblocksProduced)
-	})
 }

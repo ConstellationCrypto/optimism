@@ -9,9 +9,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 
+	"github.com/ethereum-optimism/optimism/op-core/forks"
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
-	"github.com/ethereum-optimism/optimism/op-service/predeploys"
 )
 
 type DependencySet interface {
@@ -93,10 +94,10 @@ func (ba *FetchingAttributesBuilder) PreparePayloadAttributes(ctx context.Contex
 			// deposits may never be ignored. Failing to process them is a critical error.
 			return nil, NewCriticalError(fmt.Errorf("failed to derive some deposits: %w", err))
 		}
-		// apply sysCfg changes
-		if err := UpdateSystemConfigWithL1Receipts(&sysConfig, receipts, ba.rollupCfg, info.Time()); err != nil {
-			return nil, NewCriticalError(fmt.Errorf("failed to apply derived L1 sysCfg updates: %w", err))
-		}
+
+		// errors from UpdateSystemConfigWithL1Receipts are ignored as they represent malformed or invalid updates
+		// and there is no recovery mechanism for malformed updates, we must process past them.
+		_ = UpdateSystemConfigWithL1Receipts(&sysConfig, receipts, ba.rollupCfg, info.Time())
 
 		l1Info = info
 		depositTxs = deposits
@@ -146,13 +147,27 @@ func (ba *FetchingAttributesBuilder) PreparePayloadAttributes(ctx context.Contex
 	}
 
 	if ba.rollupCfg.IsJovianActivationBlock(nextL2Time) {
-		jovian, err := JovianNetworkUpgradeTransactions(ba.rollupCfg.IsDAFootprintBlockLimit(nextL2Time), ba.rollupCfg.IsOperatorFeeFix(nextL2Time))
+		jovian, err := JovianNetworkUpgradeTransactions()
 		if err != nil {
 			return nil, NewCriticalError(fmt.Errorf("failed to build jovian network upgrade txs: %w", err))
 		}
 		upgradeTxs = append(upgradeTxs, jovian...)
 	}
 
+	// Starting with Karst, upgrade transactions are loaded from a NUT bundle and
+	// additional gas is allocated to the upgrade block so that upgrade transactions
+	// don't need to fit within the system tx gas limit.
+	var upgradeGas uint64
+	if ba.rollupCfg.IsKarstActivationBlock(nextL2Time) {
+		nutTxs, nutGas, err := UpgradeTransactions(forks.Karst)
+		if err != nil {
+			return nil, NewCriticalError(fmt.Errorf("failed to build karst network upgrade txs: %w", err))
+		}
+		upgradeTxs = append(upgradeTxs, nutTxs...)
+		upgradeGas += nutGas
+	}
+
+	// TODO(#19239): migrate Interop to NUT bundle and add its gas to upgradeGas.
 	if ba.rollupCfg.IsInteropActivationBlock(nextL2Time) {
 		interop, err := InteropNetworkUpgradeTransactions()
 		if err != nil {
@@ -174,12 +189,9 @@ func (ba *FetchingAttributesBuilder) PreparePayloadAttributes(ctx context.Contex
 		return nil, NewCriticalError(fmt.Errorf("failed to create l1InfoTx: %w", err))
 	}
 
-	var afterForceIncludeTxs []hexutil.Bytes
-
-	txs := make([]hexutil.Bytes, 0, 1+len(depositTxs)+len(afterForceIncludeTxs)+len(upgradeTxs))
+	txs := make([]hexutil.Bytes, 0, 1+len(depositTxs)+len(upgradeTxs))
 	txs = append(txs, l1InfoTx)
 	txs = append(txs, depositTxs...)
-	txs = append(txs, afterForceIncludeTxs...)
 	txs = append(txs, upgradeTxs...)
 
 	var withdrawals *types.Withdrawals
@@ -195,13 +207,15 @@ func (ba *FetchingAttributesBuilder) PreparePayloadAttributes(ctx context.Contex
 		}
 	}
 
+	gasLimit := sysConfig.GasLimit + upgradeGas
+
 	r := &eth.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(nextL2Time),
 		PrevRandao:            eth.Bytes32(l1Info.MixDigest()),
 		SuggestedFeeRecipient: predeploys.SequencerFeeVaultAddr,
 		Transactions:          txs,
 		NoTxPool:              true,
-		GasLimit:              (*eth.Uint64Quantity)(&sysConfig.GasLimit),
+		GasLimit:              (*eth.Uint64Quantity)(&gasLimit),
 		Withdrawals:           withdrawals,
 		ParentBeaconBlockRoot: parentBeaconRoot,
 	}
@@ -209,7 +223,7 @@ func (ba *FetchingAttributesBuilder) PreparePayloadAttributes(ctx context.Contex
 		r.EIP1559Params = new(eth.Bytes8)
 		*r.EIP1559Params = sysConfig.EIP1559Params
 	}
-	if ba.rollupCfg.IsMinBaseFee(nextL2Time) {
+	if ba.rollupCfg.IsJovian(nextL2Time) {
 		r.MinBaseFee = &sysConfig.MinBaseFee
 	}
 	return r, nil

@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/gameargs"
+	gameTypes "github.com/ethereum-optimism/optimism/op-challenger/game/types"
 	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/opcm"
 	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/state"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -54,77 +57,130 @@ func deployDisputeGame(
 ) error {
 	lgr := env.Logger.New("gameType", game.DisputeGameType)
 
-	var oracleAddr common.Address
-	if game.UseCustomOracle {
-		lgr.Info("deploying custom oracle")
-
-		out, err := opcm.DeployPreimageOracle(env.L1ScriptHost, opcm.DeployPreimageOracleInput{
-			MinProposalSize: new(big.Int).SetUint64(game.OracleMinProposalSize),
-			ChallengePeriod: new(big.Int).SetUint64(game.OracleChallengePeriodSeconds),
-		})
-		if err != nil {
-			return fmt.Errorf("failed to deploy preimage oracle: %w", err)
-		}
-		oracleAddr = out.PreimageOracle
-		lgr.Info("oracle deployed", "oracleAddr", oracleAddr)
-	} else {
-		lgr.Info("using existing preimage oracle")
-		oracleAddr = st.ImplementationsDeployment.PreimageOracleImpl
-	}
-
 	lgr.Info("deploying VM", "vmType", game.VMType)
 	var vmAddr common.Address
 	switch game.VMType {
 	case state.VMTypeAlphabet:
-		deployAlphabetVM, err := opcm.NewDeployAlphabetVMScript(env.L1ScriptHost)
-		if err != nil {
-			return fmt.Errorf("failed to load DeployAlphabetVM script: %w", err)
+		input := opcm.DeployAlphabetVMInput{
+			AbsolutePrestate: game.DisputeAbsolutePrestate,
+			PreimageOracle:   st.ImplementationsDeployment.PreimageOracleImpl,
 		}
 
-		out, err := deployAlphabetVM.Run(opcm.DeployAlphabetVMInput{
-			AbsolutePrestate: game.DisputeAbsolutePrestate,
-			PreimageOracle:   oracleAddr,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to deploy Alphabet VM: %w", err)
+		var out opcm.DeployAlphabetVMOutput
+		var err error
+
+		if env.UseForge {
+			lgr.Info("using Forge for DeployAlphabetVM")
+			forgeEnv := &opcm.ForgeEnv{
+				Client:     env.ForgeClient,
+				Context:    env.Context,
+				L1RPCUrl:   env.L1RPCUrl,
+				PrivateKey: env.PrivateKey,
+			}
+			out, err = opcm.DeployAlphabetVMViaForge(forgeEnv, input)
+			if err != nil {
+				return err
+			}
+		} else {
+			deployAlphabetVM, err := opcm.NewDeployAlphabetVMScript(env.L1ScriptHost)
+			if err != nil {
+				return fmt.Errorf("failed to load DeployAlphabetVM script: %w", err)
+			}
+			out, err = deployAlphabetVM.Run(input)
+			if err != nil {
+				return fmt.Errorf("failed to deploy Alphabet VM: %w", err)
+			}
 		}
 		vmAddr = out.AlphabetVM
 	case state.VMTypeCannon, state.VMTypeCannonNext:
-		out, err := opcm.DeployMIPS(env.L1ScriptHost, opcm.DeployMIPSInput{
-			MipsVersion:    game.VMType.MipsVersion(),
-			PreimageOracle: oracleAddr,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to deploy MIPS VM: %w", err)
+		if env.UseForge {
+			lgr.Info("using Forge for DeployMIPS")
+			forgeInput := opcm.DeployMIPSInput{
+				MipsVersion:    new(big.Int).SetUint64(game.VMType.MipsVersion()),
+				PreimageOracle: st.ImplementationsDeployment.PreimageOracleImpl,
+			}
+			forgeEnv := &opcm.ForgeEnv{
+				Client:     env.ForgeClient,
+				Context:    env.Context,
+				L1RPCUrl:   env.L1RPCUrl,
+				PrivateKey: env.PrivateKey,
+			}
+			forgeOut, err := opcm.DeployMIPSViaForge(forgeEnv, forgeInput)
+			if err != nil {
+				return err
+			}
+			vmAddr = forgeOut.MipsSingleton
+		} else {
+			input := opcm.DeployMIPSInput{
+				MipsVersion:    new(big.Int).SetUint64(game.VMType.MipsVersion()),
+				PreimageOracle: st.ImplementationsDeployment.PreimageOracleImpl,
+			}
+			out, err := opcm.DeployMIPS(env.L1ScriptHost, input)
+			if err != nil {
+				return fmt.Errorf("failed to deploy MIPS VM: %w", err)
+			}
+			vmAddr = out.MipsSingleton
 		}
-		vmAddr = out.MipsSingleton
 	default:
 		return fmt.Errorf("unsupported VM type: %v", game.VMType)
 	}
 	lgr.Info("vm deployed", "vmAddr", vmAddr)
 
+	var gameArgs []byte
+	args := gameargs.GameArgs{
+		AbsolutePrestate:    game.DisputeAbsolutePrestate,
+		Vm:                  vmAddr,
+		AnchorStateRegistry: thisState.OpChainContracts.AnchorStateRegistryProxy,
+		Weth:                thisState.OpChainContracts.DelayedWethPermissionedGameProxy,
+		L2ChainID:           eth.ChainIDFromBytes32(thisIntent.ID),
+		Proposer:            thisIntent.Roles.Proposer,
+		Challenger:          thisIntent.Roles.Challenger,
+	}
+	if game.DisputeGameType == uint32(gameTypes.PermissionedGameType) {
+		gameArgs = args.PackPermissioned()
+	} else {
+		gameArgs = args.PackPermissionless()
+	}
+
 	lgr.Info("deploying dispute game")
 
-	out, err := env.Scripts.DeployDisputeGame.Run(
-		opcm.DeployDisputeGameInput{
-			Release:                  "dev",
-			VmAddress:                vmAddr,
-			GameKind:                 "FaultDisputeGame",
-			GameType:                 game.DisputeGameType,
-			AbsolutePrestate:         game.DisputeAbsolutePrestate,
-			MaxGameDepth:             new(big.Int).SetUint64(game.DisputeMaxGameDepth),
-			SplitDepth:               new(big.Int).SetUint64(game.DisputeSplitDepth),
-			ClockExtension:           game.DisputeClockExtension,
-			MaxClockDuration:         game.DisputeMaxClockDuration,
-			DelayedWethProxy:         thisState.OpChainContracts.DelayedWethPermissionedGameProxy,
-			AnchorStateRegistryProxy: thisState.OpChainContracts.AnchorStateRegistryProxy,
-			L2ChainId:                new(big.Int).SetBytes(thisIntent.ID[:]),
-			Proposer:                 thisIntent.Roles.Proposer,
-			Challenger:               thisIntent.Roles.Challenger,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to deploy dispute game: %w", err)
+	input := opcm.DeployDisputeGameInput{
+		Release:                  "dev",
+		VmAddress:                vmAddr,
+		GameKind:                 "FaultDisputeGame",
+		GameType:                 game.DisputeGameType,
+		AbsolutePrestate:         game.DisputeAbsolutePrestate,
+		MaxGameDepth:             new(big.Int).SetUint64(game.DisputeMaxGameDepth),
+		SplitDepth:               new(big.Int).SetUint64(game.DisputeSplitDepth),
+		ClockExtension:           game.DisputeClockExtension,
+		MaxClockDuration:         game.DisputeMaxClockDuration,
+		DelayedWethProxy:         thisState.OpChainContracts.DelayedWethPermissionedGameProxy,
+		AnchorStateRegistryProxy: thisState.OpChainContracts.AnchorStateRegistryProxy,
+		L2ChainId:                new(big.Int).SetBytes(thisIntent.ID[:]),
+		Proposer:                 thisIntent.Roles.Proposer,
+		Challenger:               thisIntent.Roles.Challenger,
+	}
+
+	var out opcm.DeployDisputeGameOutput
+	var err error
+
+	if env.UseForge {
+		lgr.Info("using Forge for DeployDisputeGame")
+		forgeEnv := &opcm.ForgeEnv{
+			Client:     env.ForgeClient,
+			Context:    env.Context,
+			L1RPCUrl:   env.L1RPCUrl,
+			PrivateKey: env.PrivateKey,
+		}
+		out, err = opcm.DeployDisputeGameViaForge(forgeEnv, input)
+		if err != nil {
+			return err
+		}
+	} else {
+		out, err = env.Scripts.DeployDisputeGame.Run(input)
+		if err != nil {
+			return fmt.Errorf("failed to deploy dispute game: %w", err)
+		}
 	}
 	lgr.Info("dispute game deployed", "impl", out.DisputeGameImpl)
 
@@ -133,6 +189,7 @@ func deployDisputeGame(
 		Factory:             thisState.OpChainContracts.DisputeGameFactoryProxy,
 		Impl:                out.DisputeGameImpl,
 		GameType:            game.DisputeGameType,
+		GameArgs:            gameArgs,
 		AnchorStateRegistry: common.Address{},
 	}
 	if game.MakeRespected {
@@ -149,7 +206,7 @@ func deployDisputeGame(
 		GameType:      game.DisputeGameType,
 		VMType:        game.VMType,
 		GameAddress:   out.DisputeGameImpl,
-		OracleAddress: oracleAddr,
+		OracleAddress: st.ImplementationsDeployment.PreimageOracleImpl,
 		VMAddress:     vmAddr,
 	})
 

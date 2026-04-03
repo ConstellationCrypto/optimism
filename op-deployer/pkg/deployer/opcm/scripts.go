@@ -10,12 +10,9 @@ import (
 type Scripts struct {
 	DeployAlphabetVM      DeployAlphabetVMScript
 	DeployAltDA           DeployAltDAScript
-	DeployAsterisc        DeployAsteriscScript
 	DeployDisputeGame     DeployDisputeGameScript
 	DeployImplementations DeployImplementationsScript
 	DeployMIPS            DeployMIPSScript
-	DeployPreimageOracle  DeployPreimageOracleScript
-	DeployProxy           DeployProxyScript
 	DeploySuperchain      DeploySuperchainScript
 	DeployOPChain         DeployOPChainScript
 }
@@ -43,11 +40,6 @@ func NewScripts(host *script.Host) (*Scripts, error) {
 		return nil, fmt.Errorf("failed to load DeployAltDA script: %w", err)
 	}
 
-	deployAsterisc, err := NewDeployAsteriscScript(host)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load DeployAsterisc script: %w", err)
-	}
-
 	deployDisputeGame, err := NewDeployDisputeGameScript(host)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load DeployDisputeGame script: %w", err)
@@ -58,16 +50,6 @@ func NewScripts(host *script.Host) (*Scripts, error) {
 		return nil, fmt.Errorf("failed to load DeployMIPSScript script: %w", err)
 	}
 
-	deployPreimageOracle, err := NewDeployPreimageOracleScript(host)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load DeployPreimageOracle script: %w", err)
-	}
-
-	deployProxy, err := NewDeployProxyScript(host)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load DeployProxy script: %w", err)
-	}
-
 	deployOPChain, err := NewDeployOPChainScript(host)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load DeployOPChain script: %w", err)
@@ -76,11 +58,8 @@ func NewScripts(host *script.Host) (*Scripts, error) {
 	return &Scripts{
 		DeployAlphabetVM:      deployAlphabetVM,
 		DeployAltDA:           deployAltDA,
-		DeployAsterisc:        deployAsterisc,
 		DeployDisputeGame:     deployDisputeGame,
 		DeployMIPS:            deployMIPSScript,
-		DeployPreimageOracle:  deployPreimageOracle,
-		DeployProxy:           deployProxy,
 		DeployImplementations: deployImplementations,
 		DeploySuperchain:      deploySuperchain,
 		DeployOPChain:         deployOPChain,

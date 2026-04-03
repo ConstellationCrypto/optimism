@@ -25,6 +25,8 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/interop"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum-optimism/optimism/op-service/endpoint"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
@@ -52,6 +54,9 @@ func TestSystemP2PAltSync(t *testing.T) {
 		},
 		InteropConfig:       &interop.Config{},
 		L1EpochPollInterval: time.Second * 4,
+		Sync: sync.Config{
+			SyncModeReqResp: true,
+		},
 	}
 	cfg.Nodes["bob"] = &config.Config{
 		Driver: driver.Config{
@@ -61,6 +66,9 @@ func TestSystemP2PAltSync(t *testing.T) {
 		},
 		InteropConfig:       &interop.Config{},
 		L1EpochPollInterval: time.Second * 4,
+		Sync: sync.Config{
+			SyncModeReqResp: true,
+		},
 	}
 	cfg.Loggers["alice"] = testlog.Logger(t, log.LevelInfo).New("role", "alice")
 	cfg.Loggers["bob"] = testlog.Logger(t, log.LevelInfo).New("role", "bob")
@@ -136,6 +144,9 @@ func TestSystemP2PAltSync(t *testing.T) {
 				syncedPayloads = append(syncedPayloads, payload.ExecutionPayload.ID().String())
 			},
 		},
+		Sync: sync.Config{
+			SyncModeReqResp: true,
+		},
 	}
 	e2esys.ConfigureL1(syncNodeCfg, sys.EthInstances["l1"], sys.L1BeaconEndpoint())
 	syncerL2Engine, err := geth.InitL2("syncer", sys.L2GenesisCfg, cfg.JWTFilePath)
@@ -147,7 +158,7 @@ func TestSystemP2PAltSync(t *testing.T) {
 	// Ensure L1 chain configuration is provided for the sync node
 	syncNodeCfg.L1ChainConfig = sys.L1GenesisCfg.Config
 
-	syncerNode, err := rollupNode.New(ctx, syncNodeCfg, cfg.Loggers["syncer"], "", metrics.NewMetrics(""))
+	syncerNode, err := rollupNode.New(ctx, syncNodeCfg, cfg.Loggers["syncer"], "", metrics.NewMetrics("", nil), nil)
 	require.NoError(t, err)
 	err = syncerNode.Start(ctx)
 	require.NoError(t, err)
@@ -171,7 +182,7 @@ func TestSystemP2PAltSync(t *testing.T) {
 	require.Equal(t, receiptSeq, receiptVerif)
 
 	// Verify that the tx was received via P2P sync
-	require.Contains(t, syncedPayloads, eth.BlockID{Hash: receiptVerif.BlockHash, Number: receiptVerif.BlockNumber.Uint64()}.String())
+	require.Contains(t, syncedPayloads, eth.BlockID{Hash: receiptVerif.BlockHash, Number: bigs.Uint64Strict(receiptVerif.BlockNumber)}.String())
 
 	// Verify that everything that was received was published
 	require.GreaterOrEqual(t, len(published), len(syncedPayloads))

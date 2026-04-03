@@ -38,7 +38,7 @@ func (el *elNode) WaitForBlock() eth.BlockRef {
 
 func (el *elNode) WaitForLabel(label eth.BlockLabel, predicate func(eth.BlockInfo) (bool, error)) eth.BlockInfo {
 	var block eth.BlockInfo
-	err := wait.For(el.ctx, 500*time.Millisecond, func() (bool, error) {
+	err := wait.For(el.ctx, 200*time.Millisecond, func() (bool, error) {
 		var err error
 		block, err = el.inner.EthClient().InfoByLabel(el.ctx, label)
 		if err != nil {
@@ -69,9 +69,16 @@ func (el *elNode) WaitForUnsafeRef(predicate func(eth.BlockInfo) (bool, error)) 
 }
 
 func (el *elNode) WaitForBlockNumber(targetBlock uint64) eth.BlockInfo {
-	return el.WaitForUnsafe(func(info eth.BlockInfo) (bool, error) {
+	info := el.WaitForUnsafe(func(info eth.BlockInfo) (bool, error) {
 		return info.NumberU64() >= targetBlock, nil
 	})
+	if info.NumberU64() == targetBlock {
+		return info
+	}
+	// we've gone too far
+	info, err := el.inner.EthClient().InfoByNumber(el.ctx, targetBlock)
+	el.require.NoError(err, "Expected to get info by number after waiting")
+	return info
 }
 
 func (el *elNode) WaitForOnline() {

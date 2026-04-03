@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
+	"github.com/ethereum-optimism/optimism/op-core/forks"
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	actionsHelpers "github.com/ethereum-optimism/optimism/op-e2e/actions/helpers"
 	"github.com/ethereum-optimism/optimism/op-e2e/actions/proofs/helpers"
 	"github.com/ethereum-optimism/optimism/op-e2e/bindings"
-	"github.com/ethereum-optimism/optimism/op-node/rollup"
-	"github.com/ethereum-optimism/optimism/op-service/predeploys"
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
@@ -66,7 +67,7 @@ func Test_ProgramAction_JovianMinBaseFee(gt *testing.T) {
 		require.True(t, isJovian, "GPO should report that Jovian is active")
 
 		activationBlock := env.Engine.L2Chain().GetBlockByHash(env.Sequencer.L2Unsafe().Hash)
-		require.Equal(t, eip1559.EncodeMinBaseFeeExtraData(250, 6, 0), activationBlock.Extra(), "activation block should have Jovian extraData")
+		require.Equal(t, eip1559.EncodeJovianExtraData(250, 6, 0), activationBlock.Extra(), "activation block should have Jovian extraData")
 
 		// Set the minimum base fee
 		setMinBaseFeeViaSystemConfig(t, env, minBaseFee)
@@ -87,11 +88,11 @@ func Test_ProgramAction_JovianMinBaseFee(gt *testing.T) {
 		// Block after the SystemConfig change
 		env.Sequencer.ActL2EmptyBlock(t)
 		blockAfterSystemConfigChange := env.Engine.L2Chain().GetBlockByHash(env.Sequencer.L2Unsafe().Hash)
-		expectedJovianExtraDataWithMinFee := eip1559.EncodeMinBaseFeeExtraData(250, 6, minBaseFee)
+		expectedJovianExtraDataWithMinFee := eip1559.EncodeJovianExtraData(250, 6, minBaseFee)
 		require.Equal(t, expectedJovianExtraDataWithMinFee, blockAfterSystemConfigChange.Extra(), "block should have updated Jovian extraData with min base fee")
 
 		// Verify base fee is clamped
-		require.GreaterOrEqual(t, blockAfterSystemConfigChange.BaseFee().Uint64(), minBaseFee, "base fee should be >= minimum base fee")
+		require.GreaterOrEqual(t, bigs.Uint64Strict(blockAfterSystemConfigChange.BaseFee()), minBaseFee, "base fee should be >= minimum base fee")
 
 		if !jovianAtGenesis {
 			// Verify Jovian fork activation occurred by checking for the activation log
@@ -118,25 +119,25 @@ func Test_ProgramAction_JovianMinBaseFee(gt *testing.T) {
 	}{
 		"JovianActivationAfterGenesis": {
 			genesisConfigFn: func(dc *genesis.DeployConfig) {
-				dc.ActivateForkAtOffset(rollup.Jovian, 10)
+				dc.ActivateForkAtOffset(forks.Jovian, 10)
 			},
 			minBaseFee: 0,
 		},
 		"JovianActivationAtGenesisZeroMinBaseFee": {
 			genesisConfigFn: func(dc *genesis.DeployConfig) {
-				dc.ActivateForkAtGenesis(rollup.Jovian)
+				dc.ActivateForkAtGenesis(forks.Jovian)
 			},
 			minBaseFee: 0,
 		},
 		"JovianActivationAtGenesisMinBaseFeeMedium": {
 			genesisConfigFn: func(dc *genesis.DeployConfig) {
-				dc.ActivateForkAtGenesis(rollup.Jovian)
+				dc.ActivateForkAtGenesis(forks.Jovian)
 			},
 			minBaseFee: 1_000_000_000, // 1 gwei
 		},
 		"JovianActivationAtGenesisMinBaseFeeHigh": {
 			genesisConfigFn: func(dc *genesis.DeployConfig) {
-				dc.ActivateForkAtGenesis(rollup.Jovian)
+				dc.ActivateForkAtGenesis(forks.Jovian)
 			},
 			minBaseFee: 2_000_000_000, // 2 gwei
 		},

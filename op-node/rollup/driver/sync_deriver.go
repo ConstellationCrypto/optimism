@@ -104,24 +104,29 @@ func (s *SyncDeriver) OnEvent(ctx context.Context, ev event.Event) bool {
 }
 
 func (s *SyncDeriver) OnUnsafeL2Payload(ctx context.Context, envelope *eth.ExecutionPayloadEnvelope) {
-	// If we are doing CL sync or done with engine syncing, fallback to the unsafe payload queue & CL P2P sync.
-	if s.SyncCfg.SyncMode == sync.CLSync || !s.Engine.IsEngineSyncing() {
-		s.Log.Info("Optimistically queueing unsafe L2 execution payload", "id", envelope.ExecutionPayload.ID())
+	s.Log.Debug("OnUnsafeL2Payload called", "id", envelope.ExecutionPayload.ID(), "syncMode", s.SyncCfg.SyncMode, "followUnsafeWithRRSync", s.SyncCfg.SyncModeReqResp)
+
+	if s.SyncCfg.SyncMode == sync.CLSync || (!s.Engine.IsEngineInitialELSyncing() && s.SyncCfg.SyncModeReqResp) {
 		s.Engine.AddUnsafePayload(ctx, envelope)
-	} else if s.SyncCfg.SyncMode == sync.ELSync {
+		return
+	}
+
+	if s.SyncCfg.SyncMode == sync.ELSync {
 		ref, err := derive.PayloadToBlockRef(s.Config, envelope.ExecutionPayload)
 		if err != nil {
-			s.Log.Info("Failed to turn execution payload into a block ref", "id", envelope.ExecutionPayload.ID(), "err", err)
+			s.Log.Error("Failed to turn execution payload into a block ref", "id", envelope.ExecutionPayload.ID(), "err", err)
 			return
 		}
 		if ref.Number <= s.Engine.UnsafeL2Head().Number {
 			return
 		}
-		s.Log.Info("Optimistically inserting unsafe L2 execution payload to drive EL sync", "id", envelope.ExecutionPayload.ID())
+		s.Log.Info("Inserting unsafe L2 execution payload to drive EL sync", "id", envelope.ExecutionPayload.ID())
 		if err := s.Engine.InsertUnsafePayload(s.Ctx, envelope, ref); err != nil {
 			s.Log.Warn("Failed to insert unsafe payload for EL sync", "id", envelope.ExecutionPayload.ID(), "err", err)
 		}
+		return
 	}
+
 }
 
 func (s *SyncDeriver) onSafeDerivedBlock(ctx context.Context, x engine.SafeDerivedEvent) {
@@ -157,7 +162,7 @@ func (s *SyncDeriver) onEngineConfirmedReset(ctx context.Context, x engine.Engin
 			s.Log.Error("Failed to warn safe-head notifier of safe-head reset", "safe", x.CrossSafe)
 			return
 		}
-		if s.SafeHeadNotifs.Enabled() && x.CrossSafe.ID() == s.Config.Genesis.L2 {
+		if s.SafeHeadNotifs.Enabled() && x.LocalSafe.ID() == s.Config.Genesis.L2 {
 			// The rollup genesis block is always safe by definition. So if the pipeline resets this far back we know
 			// we will process all safe head updates and can record genesis as always safe from L1 genesis.
 			// Note that it is not safe to use cfg.Genesis.L1 here as it is the block immediately before the L2 genesis
@@ -168,7 +173,7 @@ func (s *SyncDeriver) onEngineConfirmedReset(ctx context.Context, x engine.Engin
 				s.Log.Error("Failed to retrieve L1 genesis, cannot notify genesis as safe block", "err", err)
 				return
 			}
-			if err := s.SafeHeadNotifs.SafeHeadUpdated(x.CrossSafe, l1Genesis.ID()); err != nil {
+			if err := s.SafeHeadNotifs.SafeHeadUpdated(x.LocalSafe, l1Genesis.ID()); err != nil {
 				s.Log.Error("Failed to notify safe-head listener of safe-head", "err", err)
 				return
 			}
@@ -224,11 +229,19 @@ func (s *SyncDeriver) SyncStep() {
 
 	s.Engine.TryUpdateEngine(s.Ctx)
 
-	if s.Engine.IsEngineSyncing() {
-		// The pipeline cannot move forwards if doing EL sync.
-		s.Log.Debug("Rollup driver is backing off because execution engine is syncing.",
+	if s.Engine.IsEngineInitialELSyncing() {
+		// The pipeline cannot move forwards if doing initial EL sync.
+		s.Log.Debug("Rollup driver is backing off because execution engine is performing initial EL sync.",
 			"unsafe_head", s.Engine.UnsafeL2Head())
 		s.StepDeriver.ResetStepBackoff(s.Ctx)
+		return
+	}
+
+	if s.SyncCfg.FollowSourceEnabled() {
+		if s.SyncCfg.NeedInitialResetEngine {
+			// May need a single reset to trigger sequencer block building
+			s.Engine.TryInitialResetEngineForSequencer(s.Ctx)
+		}
 		return
 	}
 

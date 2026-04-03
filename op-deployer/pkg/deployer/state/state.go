@@ -5,8 +5,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/core"
 
-	"github.com/ethereum-optimism/optimism/devnet-sdk/proofs/prestate"
 	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/broadcaster"
+	"github.com/ethereum-optimism/optimism/op-service/prestate"
 	"github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend/depset"
 
 	"github.com/ethereum-optimism/optimism/op-chain-ops/addresses"
@@ -24,6 +24,9 @@ import (
 type State struct {
 	// Version versions the state so we can update it later.
 	Version int `json:"version"`
+
+	// OpDeployerVersion is the version of op-deployer that was used to create the state
+	OpDeployerVersion string `json:"opDeployerVersion"`
 
 	// Create2Salt is the salt used for CREATE2 deployments.
 	Create2Salt common.Hash `json:"create2Salt"`

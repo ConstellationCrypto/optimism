@@ -1,12 +1,8 @@
-//go:build !ci
-
-// use a tag prefixed with "!". Such tag ensures that the default behaviour of this test would be to be built/run even when the go toolchain (go test) doesn't specify any tag filter.
 package conductor
 
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,7 +10,6 @@ import (
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
 	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
 	"github.com/ethereum-optimism/optimism/op-devstack/presets"
-	"github.com/ethereum-optimism/optimism/op-devstack/stack"
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
@@ -34,6 +29,7 @@ func TestConductorLeadershipTransfer(gt *testing.T) {
 	tracer := t.Tracer()
 	ctx := t.Ctx()
 	logger.Info("Started Conductor Leadership Transfer test")
+	require.NotEmpty(t, sys.ConductorSets, "expected at least one L2 conductor set")
 
 	ctx, span := tracer.Start(ctx, "test chains")
 	defer span.End()
@@ -43,6 +39,7 @@ func TestConductorLeadershipTransfer(gt *testing.T) {
 
 	// Test all L2 chains in the system
 	for l2Chain, conductors := range sys.ConductorSets {
+		require.NotEmpty(t, conductors, "expected conductors in L2 chain", "chainId", l2Chain.String())
 		chainId := l2Chain.String()
 
 		_, span = tracer.Start(ctx, fmt.Sprintf("test chain %s", chainId))
@@ -53,8 +50,7 @@ func TestConductorLeadershipTransfer(gt *testing.T) {
 
 		idToConductor := make(map[string]conductorWithInfo)
 		for _, conductor := range conductors {
-			conductorId := strings.TrimPrefix(conductor.String(), stack.ConductorKind.String()+"-")
-			idToConductor[conductorId] = conductorWithInfo{conductor, consensus.ServerInfo{}}
+			idToConductor[conductor.String()] = conductorWithInfo{conductor, consensus.ServerInfo{}}
 		}
 		for _, memberInfo := range membership.Servers {
 			conductor, ok := idToConductor[memberInfo.ID]

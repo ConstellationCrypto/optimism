@@ -19,25 +19,25 @@ import (
 // L2CLNode wraps a stack.L2CLNode interface for DSL operations
 type L2CLNode struct {
 	commonImpl
-	inner   stack.L2CLNode
-	control stack.ControlPlane
+	inner        stack.L2CLNode
+	managedPeers map[string]*L2CLNode
 }
 
 // NewL2CLNode creates a new L2CLNode DSL wrapper
-func NewL2CLNode(inner stack.L2CLNode, control stack.ControlPlane) *L2CLNode {
+func NewL2CLNode(inner stack.L2CLNode) *L2CLNode {
 	return &L2CLNode{
-		commonImpl: commonFromT(inner.T()),
-		inner:      inner,
-		control:    control,
+		commonImpl:   commonFromT(inner.T()),
+		inner:        inner,
+		managedPeers: make(map[string]*L2CLNode),
 	}
 }
 
-func (cl *L2CLNode) ID() stack.L2CLNodeID {
-	return cl.inner.ID()
+func (cl *L2CLNode) Name() string {
+	return cl.inner.Name()
 }
 
 func (cl *L2CLNode) String() string {
-	return cl.inner.ID().String()
+	return cl.inner.Name()
 }
 
 // Escape returns the underlying stack.L2CLNode
@@ -50,11 +50,28 @@ func (cl *L2CLNode) SafeL2BlockRef() eth.L2BlockRef {
 }
 
 func (cl *L2CLNode) Start() {
-	cl.control.L2CLNodeState(cl.inner.ID(), stack.Start)
+	lifecycle, ok := cl.inner.(stack.Lifecycle)
+	cl.require.Truef(ok, "L2CL node %s is not lifecycle-controllable", cl.inner.Name())
+	lifecycle.Start()
+	cl.restoreManagedPeers()
 }
 
 func (cl *L2CLNode) Stop() {
-	cl.control.L2CLNodeState(cl.inner.ID(), stack.Stop)
+	lifecycle, ok := cl.inner.(stack.Lifecycle)
+	cl.require.Truef(ok, "L2CL node %s is not lifecycle-controllable", cl.inner.Name())
+	lifecycle.Stop()
+}
+
+func (cl *L2CLNode) ManagePeer(peer *L2CLNode) {
+	cl.managedPeers[peer.Name()] = peer
+	peer.managedPeers[cl.Name()] = cl
+}
+
+func (cl *L2CLNode) restoreManagedPeers() {
+	for _, peer := range cl.managedPeers {
+		cl.connectPeerRaw(peer)
+		peer.connectPeerRaw(cl)
+	}
 }
 
 func (cl *L2CLNode) StartSequencer() {
@@ -91,6 +108,10 @@ func (cl *L2CLNode) StopSequencer() common.Hash {
 	return unsafeHead
 }
 
+func (cl *L2CLNode) SetSequencerRecoverMode(b bool) error {
+	return cl.inner.RollupAPI().SetRecoverMode(cl.ctx, b)
+}
+
 func (cl *L2CLNode) SyncStatus() *eth.SyncStatus {
 	ctx, cancel := context.WithTimeout(cl.ctx, DefaultTimeout)
 	defer cancel()
@@ -121,7 +142,7 @@ func (cl *L2CLNode) HeadBlockRef(lvl types.SafetyLevel) eth.L2BlockRef {
 }
 
 func (cl *L2CLNode) ChainID() eth.ChainID {
-	return cl.inner.ID().ChainID()
+	return cl.inner.ChainID()
 }
 
 func (cl *L2CLNode) AwaitMinL1Processed(minL1 uint64) {
@@ -140,7 +161,7 @@ func (cl *L2CLNode) AdvancedFn(lvl types.SafetyLevel, delta uint64, attempts int
 	return func() error {
 		initial := cl.HeadBlockRef(lvl)
 		target := initial.Number + delta
-		cl.log.Info("Expecting chain to advance", "id", cl.inner.ID(), "chain", cl.ChainID(), "label", lvl, "delta", delta)
+		cl.log.Info("Expecting chain to advance", "name", cl.inner.Name(), "chain", cl.ChainID(), "label", lvl, "delta", delta)
 		return cl.ReachedFn(lvl, target, attempts)()
 	}
 }
@@ -148,7 +169,7 @@ func (cl *L2CLNode) AdvancedFn(lvl types.SafetyLevel, delta uint64, attempts int
 func (cl *L2CLNode) NotAdvancedFn(lvl types.SafetyLevel, attempts int) CheckFunc {
 	return func() error {
 		initial := cl.HeadBlockRef(lvl)
-		logger := cl.log.With("id", cl.inner.ID(), "chain", cl.ChainID(), "label", lvl, "target", initial.Number)
+		logger := cl.log.With("name", cl.inner.Name(), "chain", cl.ChainID(), "label", lvl, "target", initial.Number)
 		logger.Info("Expecting chain not to advance")
 		for range attempts {
 			time.Sleep(2 * time.Second)
@@ -164,11 +185,30 @@ func (cl *L2CLNode) NotAdvancedFn(lvl types.SafetyLevel, attempts int) CheckFunc
 	}
 }
 
+// awaitSafeHeadsStalled waits until every node's safe head has stopped advancing
+// for at least 10 seconds.
+func (cl *L2CLNode) WaitForStall(lvl types.SafetyLevel) {
+	var last eth.BlockID
+	var stableSince time.Time
+	cl.require.Eventuallyf(func() bool {
+		cur := cl.HeadBlockRef(lvl).ID()
+		if cur == last {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			return time.Since(stableSince) >= 10*time.Second
+		}
+		last = cur
+		stableSince = time.Time{}
+		return false
+	}, 2*time.Minute, 2*time.Second, "expected %v head to stall", lvl)
+}
+
 // ReachedFn returns a lambda that checks the L2CL chain head with given safety level reaches the target block number
 // Composable with other lambdas to wait in parallel
 func (cl *L2CLNode) ReachedFn(lvl types.SafetyLevel, target uint64, attempts int) CheckFunc {
 	return func() error {
-		logger := cl.log.With("id", cl.inner.ID(), "chain", cl.ChainID(), "label", lvl, "target", target)
+		logger := cl.log.With("name", cl.inner.Name(), "chain", cl.ChainID(), "label", lvl, "target", target)
 		logger.Info("Expecting chain to reach")
 		return retry.Do0(cl.ctx, attempts, &retry.FixedStrategy{Dur: 2 * time.Second},
 			func() error {
@@ -191,7 +231,8 @@ func (cl *L2CLNode) ReachedRefFn(lvl types.SafetyLevel, target eth.BlockID, atte
 		if err != nil {
 			return err
 		}
-		ethclient := cl.inner.ELs()[0].EthClient()
+
+		ethclient := cl.inner.ELClient()
 		result, err := ethclient.BlockRefByNumber(cl.ctx, target.Number)
 		if err != nil {
 			return err
@@ -210,7 +251,7 @@ func (cl *L2CLNode) RewindedFn(lvl types.SafetyLevel, delta uint64, attempts int
 		initial := cl.HeadBlockRef(lvl)
 		cl.require.GreaterOrEqual(initial.Number, delta, "cannot rewind before genesis")
 		target := initial.Number - delta
-		logger := cl.log.With("id", cl.inner.ID(), "chain", cl.ChainID(), "label", lvl)
+		logger := cl.log.With("name", cl.inner.Name(), "chain", cl.ChainID(), "label", lvl)
 		logger.Info("Expecting chain to rewind", "target", target, "delta", delta)
 		// check rewind more aggressively, in shorter interval
 		return retry.Do0(cl.ctx, attempts, &retry.FixedStrategy{Dur: 250 * time.Millisecond},
@@ -230,12 +271,24 @@ func (cl *L2CLNode) Advanced(lvl types.SafetyLevel, delta uint64, attempts int) 
 	cl.require.NoError(cl.AdvancedFn(lvl, delta, attempts)())
 }
 
+func (cl *L2CLNode) AdvancedUnsafe(delta uint64, attempts int) {
+	cl.Advanced(types.LocalUnsafe, delta, attempts)
+}
+
 func (cl *L2CLNode) NotAdvanced(lvl types.SafetyLevel, attempts int) {
 	cl.require.NoError(cl.NotAdvancedFn(lvl, attempts)())
 }
 
+func (cl *L2CLNode) NotAdvancedUnsafe(attempts int) {
+	cl.NotAdvanced(types.LocalUnsafe, attempts)
+}
+
 func (cl *L2CLNode) Reached(lvl types.SafetyLevel, target uint64, attempts int) {
 	cl.require.NoError(cl.ReachedFn(lvl, target, attempts)())
+}
+
+func (cl *L2CLNode) ReachedUnsafe(target uint64, attempts int) {
+	cl.Reached(types.LocalUnsafe, target, attempts)
 }
 
 func (cl *L2CLNode) ReachedRef(lvl types.SafetyLevel, target eth.BlockID, attempts int) {
@@ -248,7 +301,7 @@ func (cl *L2CLNode) Rewinded(lvl types.SafetyLevel, delta uint64, attempts int) 
 
 // ChainSyncStatus satisfies that the L2CLNode can provide sync status per chain
 func (cl *L2CLNode) ChainSyncStatus(chainID eth.ChainID, lvl types.SafetyLevel) eth.BlockID {
-	cl.require.Equal(chainID, cl.inner.ID().ChainID(), "chain ID mismatch")
+	cl.require.Equal(chainID, cl.inner.ChainID(), "chain ID mismatch")
 	return cl.HeadBlockRef(lvl).ID()
 }
 
@@ -281,6 +334,10 @@ func (cl *L2CLNode) Matched(refNode SyncStatusProvider, lvl types.SafetyLevel, a
 	cl.require.NoError(cl.MatchedFn(refNode, lvl, attempts)())
 }
 
+func (cl *L2CLNode) MatchedUnsafe(refNode SyncStatusProvider, attempts int) {
+	cl.Matched(refNode, types.LocalUnsafe, attempts)
+}
+
 func (cl *L2CLNode) PeerInfo() *apis.PeerInfo {
 	peerInfo, err := retry.Do(cl.ctx, 3, retry.Exponential(), func() (*apis.PeerInfo, error) {
 		return cl.inner.P2PAPI().Self(cl.ctx)
@@ -298,6 +355,12 @@ func (cl *L2CLNode) Peers() *apis.PeerDump {
 }
 
 func (cl *L2CLNode) DisconnectPeer(peer *L2CLNode) {
+	delete(cl.managedPeers, peer.Name())
+	delete(peer.managedPeers, cl.Name())
+	cl.disconnectPeerRaw(peer)
+}
+
+func (cl *L2CLNode) disconnectPeerRaw(peer *L2CLNode) {
 	peerInfo := peer.PeerInfo()
 	err := retry.Do0(cl.ctx, 3, retry.Exponential(), func() error {
 		return cl.inner.P2PAPI().DisconnectPeer(cl.ctx, peerInfo.PeerID)
@@ -306,6 +369,12 @@ func (cl *L2CLNode) DisconnectPeer(peer *L2CLNode) {
 }
 
 func (cl *L2CLNode) ConnectPeer(peer *L2CLNode) {
+	cl.managedPeers[peer.Name()] = peer
+	peer.managedPeers[cl.Name()] = cl
+	cl.connectPeerRaw(peer)
+}
+
+func (cl *L2CLNode) connectPeerRaw(peer *L2CLNode) {
 	peerInfo := peer.PeerInfo()
 	cl.require.NotZero(len(peerInfo.Addresses), "failed to get peer address")
 	// graceful backoff for p2p connection, to avoid dial backoff or connection refused error
@@ -328,6 +397,20 @@ func (cl *L2CLNode) IsP2PConnected(peer *L2CLNode) {
 		return errors.New("peer not connected yet")
 	})
 	cl.require.NoError(err, "peer not connected")
+}
+
+func (cl *L2CLNode) IsP2PDisconnected(peer *L2CLNode) {
+	myInfo := cl.PeerInfo()
+	strategy := &retry.ExponentialStrategy{Min: 10 * time.Second, Max: 30 * time.Second, MaxJitter: 250 * time.Millisecond}
+	err := retry.Do0(cl.ctx, 5, strategy, func() error {
+		for _, p := range peer.Peers().Peers {
+			if p.PeerID == myInfo.PeerID {
+				return errors.New("peer still connected")
+			}
+		}
+		return nil
+	})
+	cl.require.NoError(err, "peer not disconnected")
 }
 
 type safeHeadDbMatchOpts struct {
@@ -412,4 +495,24 @@ func (cl *L2CLNode) AppendUnsafePayloadUntilTip(verEL, seqEL *L2ELNode, maxAttem
 
 func (cl *L2CLNode) UnsafeHead() *BlockRefResult {
 	return &BlockRefResult{T: cl.t, BlockRef: cl.HeadBlockRef(types.LocalUnsafe)}
+}
+
+func (cl *L2CLNode) SafeHead() *BlockRefResult {
+	return &BlockRefResult{T: cl.t, BlockRef: cl.HeadBlockRef(types.CrossSafe)}
+}
+
+func (cl *L2CLNode) CurrentL1MatchedFn(refNode *L2CLNode, attempts int) CheckFunc {
+	return func() error {
+		return retry.Do0(cl.ctx, attempts, &retry.FixedStrategy{Dur: 1 * time.Second},
+			func() error {
+				currentL1 := cl.SyncStatus().CurrentL1
+				ref := refNode.SyncStatus().CurrentL1
+				if currentL1 == ref {
+					cl.log.Info("CurrentL1 reached", "currentL1", currentL1)
+					return nil
+				}
+				cl.log.Info("Chain sync status", "currentL1", currentL1.Number, "ref", ref)
+				return fmt.Errorf("expected currentL1 to match")
+			})
+	}
 }

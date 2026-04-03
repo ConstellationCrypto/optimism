@@ -8,15 +8,13 @@ import (
 )
 
 func TestProposer(gt *testing.T) {
-	t := devtest.SerialT(gt)
-	sys := presets.NewSimpleInterop(t)
+	t := devtest.ParallelT(gt)
+	sys := presets.NewSimpleInteropSupernodeProofs(t, presets.WithChallengerCannonKonaEnabled())
 
 	dgf := sys.DisputeGameFactory()
 
 	newGame := dgf.WaitForGame()
 	rootClaim := newGame.RootClaim().Value()
 	l2SequenceNumber := newGame.L2SequenceNumber()
-
-	superRoot := sys.Supervisor.FetchSuperRootAtTimestamp(l2SequenceNumber.Uint64())
-	t.Require().Equal(superRoot.SuperRoot[:], rootClaim[:])
+	sys.SuperRoots.AssertSuperRootAtTimestamp(l2SequenceNumber, rootClaim)
 }

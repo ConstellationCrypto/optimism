@@ -1,9 +1,8 @@
 package logpipe
 
 import (
-	"bytes"
 	"io"
-	"sync"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,35 +12,18 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 )
 
-func TestPipeLogs(t *testing.T) {
+func TestWriteToLogProcessor(t *testing.T) {
 	logger, capt := testlog.CaptureLogger(t, log.LevelTrace)
 
-	wg := new(sync.WaitGroup)
-	wg.Add(2)
-
-	r, w := io.Pipe()
-	// Write the log output to the pipe
-	go func() {
-		defer wg.Done()
-		_, err := io.Copy(w, bytes.NewReader([]byte(`{"level": "DEBUG", "fields": {"message": "hello", "foo": 1}}`+"\n")))
-		require.NoError(t, err)
-		_, err = io.Copy(w, bytes.NewReader([]byte(`test invalid JSON`+"\n")))
-		require.NoError(t, err)
-		_, err = io.Copy(w, bytes.NewReader([]byte(`{"fields": {"message": "world", "bar": "sunny"}, "level": "INFO"}`+"\n")))
-		require.NoError(t, err)
-		require.NoError(t, w.Close())
-	}()
-	// Read the log output from the pipe
-	go func() {
-		defer wg.Done()
-		toLogger := ToLogger(logger)
-		logProc := func(line []byte) {
-			toLogger(ParseRustStructuredLogs(line))
-		}
-		err := PipeLogs(r, logProc)
-		require.NoError(t, err)
-	}()
-	wg.Wait()
+	proc := NewLineBuffer(func(line []byte) {
+		ToLogger(logger)(ParseRustStructuredLogs(line))
+	})
+	_, err := io.Copy(proc, strings.NewReader(`{"level": "DEBUG", "fields": {"message": "hello", "foo": 1}}`+"\n"))
+	require.NoError(t, err)
+	_, err = io.Copy(proc, strings.NewReader(`test invalid JSON`+"\n"))
+	require.NoError(t, err)
+	_, err = io.Copy(proc, strings.NewReader(`{"fields": {"message": "world", "bar": "sunny"}, "level": "INFO"}`+"\n"))
+	require.NoError(t, err)
 
 	entry1 := capt.FindLog(
 		testlog.NewLevelFilter(log.LevelDebug),
@@ -60,4 +42,31 @@ func TestPipeLogs(t *testing.T) {
 		testlog.NewAttributesContainsFilter("bar", "sunny"))
 	require.NotNil(t, entry3)
 	require.Equal(t, "world", entry3.Message)
+}
+
+func TestWriteToLogProcessorWithMinLevel(t *testing.T) {
+	logger, capt := testlog.CaptureLogger(t, log.LevelTrace)
+
+	proc := NewLineBuffer(func(line []byte) {
+		ToLoggerWithMinLevel(logger, log.LevelWarn)(ParseRustStructuredLogs(line))
+	})
+	_, err := io.Copy(proc, strings.NewReader(`{"level": "DEBUG", "fields": {"message": "hello", "foo": 1}}`+"\n"))
+	require.NoError(t, err)
+	_, err = io.Copy(proc, strings.NewReader(`{"fields": {"message": "world", "bar": "sunny"}, "level": "INFO"}`+"\n"))
+	require.NoError(t, err)
+	_, err = io.Copy(proc, strings.NewReader(`{"fields": {"message": "warn", "baz": "kept"}, "level": "WARN"}`+"\n"))
+	require.NoError(t, err)
+
+	require.Nil(t, capt.FindLog(
+		testlog.NewLevelFilter(log.LevelDebug),
+		testlog.NewAttributesContainsFilter("foo", "1")))
+	require.Nil(t, capt.FindLog(
+		testlog.NewLevelFilter(log.LevelInfo),
+		testlog.NewAttributesContainsFilter("bar", "sunny")))
+
+	entry := capt.FindLog(
+		testlog.NewLevelFilter(log.LevelWarn),
+		testlog.NewAttributesContainsFilter("baz", "kept"))
+	require.NotNil(t, entry)
+	require.Equal(t, "warn", entry.Message)
 }

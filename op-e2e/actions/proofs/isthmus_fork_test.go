@@ -12,11 +12,11 @@ import (
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/geth"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	"github.com/ethereum-optimism/optimism/op-e2e/actions/proofs/helpers"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils"
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
-	"github.com/ethereum-optimism/optimism/op-service/predeploys"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -356,7 +356,7 @@ func testIsthmusNetworkUpgradeTransactions(gt *testing.T, testCfg *helpers.TestC
 	// get latest block
 	latestBlock, err := ethCl.BlockByNumber(context.Background(), nil)
 	require.NoError(t, err)
-	require.Equal(t, sequencer.L2Unsafe().Number, latestBlock.Number().Uint64())
+	require.Equal(t, sequencer.L2Unsafe().Number, latestBlock.NumberU64())
 
 	transactions := latestBlock.Transactions()
 

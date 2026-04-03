@@ -17,6 +17,16 @@ var (
 
 	// DeployV2DisputeGamesDevFlag enables deployment of V2 dispute game contracts.
 	DeployV2DisputeGamesDevFlag = common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000100")
+
+	// OPCMV2DevFlag enables the OPContractsManagerV2 contract.
+	OPCMV2DevFlag = common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000010000")
+
+	// L2CMDevFlag enables L2CM.
+	L2CMDevFlag = common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000100000")
+
+	// ZKDisputeGameDevFlag enables the ZK dispute game system (ZKDisputeGame).
+	// TODO(#19432): Use this flag in the OPCM/OPD integration pipeline.
+	ZKDisputeGameDevFlag = common.HexToHash("0x0000000000000000000000000000000000000000000000000000000001000000")
 )
 
 // IsDevFeatureEnabled checks if a specific development feature is enabled in a feature bitmap.
@@ -31,6 +41,7 @@ func IsDevFeatureEnabled(bitmap, flag common.Hash) bool {
 	return featuresIsNonZero && bitmapContainsFeatures
 }
 
+// EnableDevFeature enables a specific development feature in a feature bitmap
 func EnableDevFeature(bitmap, flag common.Hash) common.Hash {
 	var result common.Hash
 	for i := 0; i < 32; i++ {

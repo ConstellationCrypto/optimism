@@ -191,7 +191,9 @@ contract Initializer_Test is CommonTest {
                             l1ERC721Bridge: address(0),
                             l1StandardBridge: address(0),
                             optimismPortal: address(0),
-                            optimismMintableERC20Factory: address(0)
+                            optimismMintableERC20Factory: address(0),
+                            delayedWETH: address(0),
+                            opcm: address(0)
                         }),
                         0,
                         ISuperchainConfig(address(0))
@@ -227,7 +229,9 @@ contract Initializer_Test is CommonTest {
                             l1ERC721Bridge: address(0),
                             l1StandardBridge: address(0),
                             optimismPortal: address(0),
-                            optimismMintableERC20Factory: address(0)
+                            optimismMintableERC20Factory: address(0),
+                            delayedWETH: address(0),
+                            opcm: address(0)
                         }),
                         0,
                         ISuperchainConfig(address(0))
@@ -389,17 +393,17 @@ contract Initializer_Test is CommonTest {
         //       contracts and instead simply deploys them anonymously. Means that functions like "getInitializedSlot"
         //       don't work properly. Remove these exclusions once the deployment script is fixed.
         excludes[j++] = "src/dispute/FaultDisputeGame.sol";
-        excludes[j++] = "src/dispute/v2/FaultDisputeGameV2.sol";
-        excludes[j++] = "src/dispute/v2/PermissionedDisputeGameV2.sol";
-        excludes[j++] = "src/dispute/SuperFaultDisputeGame.sol";
         excludes[j++] = "src/dispute/PermissionedDisputeGame.sol";
+        excludes[j++] = "src/dispute/SuperFaultDisputeGame.sol";
         excludes[j++] = "src/dispute/SuperPermissionedDisputeGame.sol";
+        excludes[j++] = "src/dispute/zk/OptimisticZkGame.sol";
         // TODO: Eventually remove this exclusion. Same reason as above dispute contracts.
         excludes[j++] = "src/L1/OPContractsManager.sol";
         // TODO: Eventually remove this exclusion. Same reason as above dispute contracts.
         excludes[j++] = "src/L1/OptimismPortalInterop.sol";
         // L2 contract initialization is tested in Predeploys.t.sol
         excludes[j++] = "src/L2/*";
+        excludes[j++] = "src/L1/FeesDepositor.sol";
 
         // Get all contract names in the src directory, minus the excluded contracts.
         string[] memory contractNames = ForgeArtifacts.getContractNames("src/*", excludes);

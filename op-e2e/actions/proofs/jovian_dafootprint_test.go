@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
+	"github.com/ethereum-optimism/optimism/op-core/forks"
+	"github.com/ethereum-optimism/optimism/op-core/predeploys"
 	actionsHelpers "github.com/ethereum-optimism/optimism/op-e2e/actions/helpers"
 	"github.com/ethereum-optimism/optimism/op-e2e/actions/proofs/helpers"
 	"github.com/ethereum-optimism/optimism/op-e2e/bindings"
-	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
-	"github.com/ethereum-optimism/optimism/op-service/predeploys"
+	"github.com/ethereum-optimism/optimism/op-service/bigs"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -107,7 +108,7 @@ func Test_ProgramAction_JovianDAFootprint(gt *testing.T) {
 			tx := types.MustSignNewTx(env.Dp.Secrets.Alice, signer, txData)
 
 			// Estimate incremental DA footprint if we include this tx.
-			est := tx.RollupCostData().EstimatedDASize().Uint64() * uint64(effectiveScalar)
+			est := bigs.Uint64Strict(tx.RollupCostData().EstimatedDASize()) * uint64(effectiveScalar)
 			if runningDAFootprint+est > gasLimit {
 				break
 			} else if isLowScalar && runningGas+tx.Gas() > gasLimit {
@@ -151,7 +152,7 @@ func Test_ProgramAction_JovianDAFootprint(gt *testing.T) {
 			require.NotNil(t, recScalar, "nil receipt DA footprint gas scalar")
 			require.EqualValues(t, effectiveScalar, *recScalar, "DA footprint gas scalar mismatch in receipt")
 
-			txDAFootprint := tx.RollupCostData().EstimatedDASize().Uint64() * uint64(effectiveScalar)
+			txDAFootprint := bigs.Uint64Strict(tx.RollupCostData().EstimatedDASize()) * uint64(effectiveScalar)
 			require.Equal(t, txDAFootprint, receipts[i].BlobGasUsed, "tx DA footprint mismatch with receipt")
 			expectedDAFootprint += txDAFootprint
 		}
@@ -190,7 +191,7 @@ func Test_ProgramAction_JovianDAFootprint(gt *testing.T) {
 
 		jovianAtGenesis := env.Sequencer.RollupCfg.IsJovian(env.Sequencer.RollupCfg.Genesis.L2Time)
 		if !jovianAtGenesis {
-			env.Sequencer.ActBuildL2ToFork(t, rollup.Jovian)
+			env.Sequencer.ActBuildL2ToFork(t, forks.Jovian)
 		}
 
 		// We run three sub-steps. First, we test the default behavior. Then we update the scalar to
@@ -213,10 +214,10 @@ func Test_ProgramAction_JovianDAFootprint(gt *testing.T) {
 		genesisConfigFn helpers.DeployConfigOverride
 	}{
 		"JovianAtGenesis": {
-			genesisConfigFn: func(dc *genesis.DeployConfig) { dc.ActivateForkAtGenesis(rollup.Jovian) },
+			genesisConfigFn: func(dc *genesis.DeployConfig) { dc.ActivateForkAtGenesis(forks.Jovian) },
 		},
 		"JovianAfterGenesis": {
-			genesisConfigFn: func(dc *genesis.DeployConfig) { dc.ActivateForkAtOffset(rollup.Jovian, 4) },
+			genesisConfigFn: func(dc *genesis.DeployConfig) { dc.ActivateForkAtOffset(forks.Jovian, 4) },
 		},
 	}
 

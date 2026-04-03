@@ -14,11 +14,24 @@ library DevFeatures {
     bytes32 public constant OPTIMISM_PORTAL_INTEROP =
         bytes32(0x0000000000000000000000000000000000000000000000000000000000000001);
 
+    /// @notice The feature that gates the respected game type override for CANNON_KONA during upgrades.
     bytes32 public constant CANNON_KONA = bytes32(0x0000000000000000000000000000000000000000000000000000000000000010);
 
     /// @notice The feature that enables deployment of V2 dispute game contracts.
+    /// @custom:legacy
+    /// This feature is no longer used, but is kept here for legacy reasons.
     bytes32 public constant DEPLOY_V2_DISPUTE_GAMES =
         bytes32(0x0000000000000000000000000000000000000000000000000000000000000100);
+
+    /// @notice The feature that enables the OPContractsManagerV2 contract.
+    bytes32 public constant OPCM_V2 = bytes32(0x0000000000000000000000000000000000000000000000000000000000010000);
+
+    /// @notice The feature that enables L2CM.
+    bytes32 public constant L2CM = bytes32(0x0000000000000000000000000000000000000000000000000000000000100000);
+
+    /// @notice The feature that enables the ZK dispute game system (ZKDisputeGame).
+    bytes32 public constant ZK_DISPUTE_GAME =
+        bytes32(0x0000000000000000000000000000000000000000000000000000000001000000);
 
     /// @notice Checks if a feature is enabled in a bitmap. Note that this function does not check
     ///         that the input feature represents a single feature and the bitwise AND operation

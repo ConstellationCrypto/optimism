@@ -13,10 +13,17 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
+	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
+	"github.com/ethereum-optimism/optimism/op-supernode/supernode/activity"
+	"github.com/ethereum-optimism/optimism/op-supernode/supernode/activity/heartbeat"
+	"github.com/ethereum-optimism/optimism/op-supernode/supernode/activity/interop"
+	supernodeactivity "github.com/ethereum-optimism/optimism/op-supernode/supernode/activity/supernode"
+	"github.com/ethereum-optimism/optimism/op-supernode/supernode/activity/superroot"
 	cc "github.com/ethereum-optimism/optimism/op-supernode/supernode/chain_container"
 	"github.com/ethereum-optimism/optimism/op-supernode/supernode/resources"
 	gethlog "github.com/ethereum/go-ethereum/log"
+	rpc "github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/ethereum-optimism/optimism/op-supernode/config"
 )
@@ -28,14 +35,16 @@ type Supernode struct {
 	stopped      bool
 	cfg          *config.CLIConfig
 	chains       map[eth.ChainID]cc.ChainContainer
+	activities   []activity.Activity
+	rootRPC      *oprpc.Handler
 	wg           sync.WaitGroup
 	l1Client     *sources.L1Client
 	beaconClient *sources.L1BeaconClient
 	httpServer   *httputil.HTTPServer
 	rpcRouter    *resources.Router
 	// Metrics router/server for per-chain metrics
-	metrics       *resources.MetricsService
-	metricsRouter *resources.MetricsRouter
+	metrics      *resources.MetricsService
+	metricsFanIn *resources.MetricsFanIn
 	// cached address when available
 	rpcAddr string
 }
@@ -57,8 +66,11 @@ func New(ctx context.Context, log gethlog.Logger, version string, requestStop co
 	// Pass shared resources via InitializationOverrides to all containers
 	// Build RPC router first; we'll attach per-chain handlers at runtime via SetHandler
 	s.rpcRouter = resources.NewRouter(log, resources.RouterConfig{})
+	// Root JSON-RPC handler mounted at '/'
+	s.rootRPC = oprpc.NewHandler(version, oprpc.WithLogger(log))
+	s.rpcRouter.SetRootHandler(s.rootRPC)
 	// Build metrics router; attach per-chain registries later
-	s.metricsRouter = resources.NewMetricsRouter(log)
+	s.metricsFanIn = resources.NewMetricsFanIn(len(cfg.Chains))
 	for _, id := range cfg.Chains {
 		chainID := eth.ChainIDFromUInt64(id)
 		initOverrides := &rollupNode.InitializationOverrides{
@@ -70,14 +82,41 @@ func New(ctx context.Context, log gethlog.Logger, version string, requestStop co
 			log.Error("missing virtual node config for chain", "chain", id)
 			continue
 		}
-		s.chains[chainID] = cc.NewChainContainer(chainID, vnCfgs[chainID], log, *cfg, initOverrides, nil, s.rpcRouter.SetHandler, s.metricsRouter.SetHandler)
+		container := cc.NewChainContainer(chainID, vnCfgs[chainID], log, *cfg, initOverrides, nil, s.rpcRouter.SetHandler, s.metricsFanIn.SetMetricsRegistry)
+		s.chains[chainID] = container
 	}
+
+	// Initialize fixed activities
+	s.activities = []activity.Activity{
+		heartbeat.New(log.New("activity", "heartbeat"), 10*time.Second),
+		supernodeactivity.New(log.New("activity", "supernode"), s.chains),
+		superroot.New(log.New("activity", "superroot"), s.chains),
+	}
+
+	log.Info("initializing interop activity? %v", cfg.InteropActivationTimestamp != nil)
+	// Initialize interop activity if the activation timestamp is set (non-nil)
+	// If it's nil, don't start interop. If it's non-nil (including 0), do start it.
+	if cfg.InteropActivationTimestamp != nil {
+		interopActivity := interop.New(log.New("activity", "interop"), *cfg.InteropActivationTimestamp, s.chains, cfg.DataDir)
+		s.activities = append(s.activities, interopActivity)
+		for _, chain := range s.chains {
+			chain.RegisterVerifier(interopActivity)
+		}
+	}
+
+	// Set up reset callbacks on all chain containers
+	// When a chain resets, notify all activities
+	for _, chain := range s.chains {
+		chain.SetResetCallback(s.onChainReset)
+	}
+
+	// Set up http server
 	addr := net.JoinHostPort(cfg.RPCConfig.ListenAddr, strconv.Itoa(cfg.RPCConfig.ListenPort))
 	s.httpServer = httputil.NewHTTPServer(addr, s.rpcRouter)
 
 	// Optionally build metrics service
 	if cfg.MetricsConfig.Enabled {
-		s.metrics = resources.NewMetricsService(log, cfg.MetricsConfig.ListenAddr, cfg.MetricsConfig.ListenPort, s.metricsRouter)
+		s.metrics = resources.NewMetricsService(log, cfg.MetricsConfig.ListenAddr, cfg.MetricsConfig.ListenPort, s.metricsFanIn)
 	}
 	return s, nil
 }
@@ -105,12 +144,38 @@ func (s *Supernode) Start(ctx context.Context) error {
 	// Start metrics service
 	if s.metrics != nil {
 		s.wg.Add(1)
-		s.metrics.Start(func(err error) {
-			defer s.wg.Done()
+		s.metrics.Start(s.wg.Done, func(err error) {
 			if s.requestStop != nil {
 				s.requestStop(err)
 			}
 		})
+	}
+	// Register RPC APIs and start only Runnable activities
+	for _, a := range s.activities {
+		if ra, ok := a.(activity.RPCActivity); ok {
+			if err := s.rootRPC.AddAPI(rpc.API{Namespace: ra.RPCNamespace(), Service: ra.RPCService()}); err != nil {
+				s.log.Error("failed to register activity RPC API", "namespace", ra.RPCNamespace(), "error", err)
+			}
+		}
+		if run, ok := a.(activity.RunnableActivity); ok {
+			s.wg.Add(1)
+			go func(run activity.RunnableActivity) {
+				defer s.wg.Done()
+				err := run.Start(ctx)
+				activityName := a.Name()
+				switch err {
+				case nil:
+					s.log.Error("activity quit unexpectedly", "name", activityName)
+				case context.Canceled:
+					// This is the happy path, normal / clean shutdown
+					s.log.Info("activity closing due to cancelled context", "name", activityName)
+				case context.DeadlineExceeded:
+					s.log.Warn("activity quit due to deadline exceeded", "name", activityName)
+				default:
+					s.log.Error("error starting runnable activity", "name", activityName, "error", err)
+				}
+			}(run)
+		}
 	}
 	for chainID, chain := range s.chains {
 		s.wg.Add(1)
@@ -121,9 +186,7 @@ func (s *Supernode) Start(ctx context.Context) error {
 			}
 		}(chainID, chain)
 	}
-	<-ctx.Done()
-	s.log.Info("supernode received stop signal")
-	return ctx.Err()
+	return nil
 }
 
 func (s *Supernode) Stop(ctx context.Context) error {
@@ -136,6 +199,8 @@ func (s *Supernode) Stop(ctx context.Context) error {
 		defer cancel()
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 			s.log.Error("error shutting down rpc server", "error", err)
+		} else {
+			s.log.Info("rpc server stopped")
 		}
 	}
 	if s.metrics != nil {
@@ -143,32 +208,86 @@ func (s *Supernode) Stop(ctx context.Context) error {
 		defer cancel()
 		if err := s.metrics.Stop(shutdownCtx); err != nil {
 			s.log.Error("error shutting down metrics server", "error", err)
+		} else {
+			s.log.Info("metrics server stopped")
 		}
 	}
 	if s.rpcRouter != nil {
 		if err := s.rpcRouter.Close(); err != nil {
 			s.log.Error("error closing rpc router", "error", err)
+		} else {
+			s.log.Info("rpc router closed")
 		}
 	}
-	if s.metricsRouter != nil {
-		if err := s.metricsRouter.Close(); err != nil {
-			s.log.Error("error closing metrics router", "error", err)
+
+	// Stop runnable activities
+	for _, a := range s.activities {
+		activityName := a.Name()
+		if run, ok := a.(activity.RunnableActivity); ok {
+			if err := run.Stop(ctx); err != nil {
+				s.log.Error("error stopping runnable activity", "name", activityName, "error", err)
+			} else {
+				s.log.Info("runnable activity stopped", "name", activityName)
+			}
 		}
 	}
 
 	for chainID, chain := range s.chains {
 		if err := chain.Stop(ctx); err != nil {
 			s.log.Error("error stopping chain container", "chain_id", chainID.String(), "error", err)
+		} else {
+			s.log.Info("chain container stopped", "chain_id", chainID.String())
 		}
 	}
 
+	s.log.Info("all chain containers stopped, waiting for goroutines to finish")
 	s.wg.Wait()
+	s.log.Info("goroutines finished, closing l1 client")
 
 	if s.l1Client != nil {
 		s.l1Client.Close()
 	}
+	s.log.Info("l1 client closed, supernode stopped")
 
 	return nil
+}
+
+// onChainReset is called when a chain container resets due to an invalidated block.
+// It notifies all activities about the reset so they can clean up cached state.
+func (s *Supernode) onChainReset(chainID eth.ChainID, timestamp uint64, invalidatedBlock eth.BlockRef) {
+	s.log.Info("chain reset detected, notifying activities",
+		"chainID", chainID,
+		"timestamp", timestamp,
+		"invalidatedBlock", invalidatedBlock,
+	)
+	for _, a := range s.activities {
+		a.Reset(chainID, timestamp, invalidatedBlock)
+	}
+}
+
+// PauseInteropActivity pauses the interop activity at the given timestamp.
+// When the interop activity attempts to process this timestamp, it returns early.
+// This function is for integration test control only.
+func (s *Supernode) PauseInteropActivity(ts uint64) {
+	for _, a := range s.activities {
+		if ia, ok := a.(*interop.Interop); ok {
+			ia.PauseAt(ts)
+			return
+		}
+	}
+	s.log.Warn("PauseInterop called but no interop activity found")
+}
+
+// ResumeInteropActivity clears any pause on the interop activity, allowing normal processing.
+// This function is for integration test control only.
+func (s *Supernode) ResumeInteropActivity() {
+	for _, a := range s.activities {
+		if ia, ok := a.(*interop.Interop); ok {
+			ia.Resume()
+			return
+		}
+	}
+	s.log.Warn("ResumeInterop called but no interop activity found")
 }
 
 func (s *Supernode) Stopped() bool { return s.stopped }
@@ -217,7 +336,11 @@ func (s *Supernode) initL1Client(ctx context.Context, cfg *config.CLIConfig) err
 	s.log.Info("initializing shared L1 client", "l1_addr", cfg.L1NodeAddr)
 
 	// Create L1 RPC client with basic configuration
-	l1RPC, err := client.NewRPC(ctx, s.log, cfg.L1NodeAddr, client.WithDialAttempts(10))
+	// Enable HTTP polling for L1 heads to support HTTP-only L1 connections (e.g., in tests)
+	l1RPC, err := client.NewRPC(ctx, s.log, cfg.L1NodeAddr,
+		client.WithDialAttempts(10),
+		client.WithHttpPollInterval(time.Second*2), // Poll every 2 seconds for HTTP connections
+	)
 	if err != nil {
 		return fmt.Errorf("failed to dial L1 address (%s): %w", cfg.L1NodeAddr, err)
 	}
