@@ -4,9 +4,12 @@ use core::cmp::max;
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::calc_next_block_base_fee;
+use alloy_primitives::hex;
 use op_alloy_consensus::{EIP1559ParamError, decode_holocene_extra_data, decode_jovian_extra_data};
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_optimism_forks::OpHardforks;
+
+const BASEFEE_LOG_TARGET: &str = "reth_optimism_chainspec::basefee";
 
 /// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
 ///
@@ -21,15 +24,41 @@ pub fn decode_holocene_base_fee<H>(
 where
     H: BlockHeader,
 {
+    tracing::debug!(
+        target: BASEFEE_LOG_TARGET,
+        op = "decode_holocene_base_fee",
+        chain = ?chain_spec.chain(),
+        parent_number = parent.number(),
+        parent_timestamp = parent.timestamp(),
+        parent_hash = %parent.parent_hash(),
+        parent_base_fee = ?parent.base_fee_per_gas(),
+        next_block_timestamp = timestamp,
+        extra_data = %hex::encode_prefixed(parent.extra_data()),
+        "holocene base fee: inputs",
+    );
+
     let (elasticity, denominator) = decode_holocene_extra_data(parent.extra_data())?;
 
-    let base_fee_params = if elasticity == 0 && denominator == 0 {
+    // Valid Holocene headers require both values non-zero. A lone zero is invalid and would yield
+    // a `BaseFeeParams` that divides by zero in `calc_next_block_base_fee`; use chain config.
+    let base_fee_params = if elasticity == 0 || denominator == 0 {
         chain_spec.base_fee_params_at_timestamp(timestamp)
     } else {
         BaseFeeParams::new(denominator as u128, elasticity as u128)
     };
 
-    Ok(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
+    let next = parent.next_block_base_fee(base_fee_params).unwrap_or_default();
+    tracing::debug!(
+        target: BASEFEE_LOG_TARGET,
+        op = "decode_holocene_base_fee",
+        elasticity,
+        denominator,
+        base_fee_params_from_chain = elasticity == 0 || denominator == 0,
+        next_base_fee = next,
+        "holocene base fee: computed",
+    );
+
+    Ok(next)
 }
 
 /// Extracts the Jovian 1599 parameters from the encoded extra data from the parent header.
@@ -50,7 +79,7 @@ where
 {
     let (elasticity, denominator, min_base_fee) = decode_jovian_extra_data(parent.extra_data())?;
 
-    let base_fee_params = if elasticity == 0 && denominator == 0 {
+    let base_fee_params = if elasticity == 0 || denominator == 0 {
         chain_spec.base_fee_params_at_timestamp(timestamp)
     } else {
         BaseFeeParams::new(denominator as u128, elasticity as u128)
