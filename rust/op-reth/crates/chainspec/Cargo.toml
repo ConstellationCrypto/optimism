@@ -42,6 +42,7 @@ miniz_oxide = { workspace = true, features = ["with-alloc"], optional = true }
 
 # misc
 derive_more.workspace = true
+tracing.workspace = true
 paste = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
@@ -69,6 +70,7 @@ std = [
     "reth-network-peers/std",
     "serde_json/std",
     "serde?/std",
+    "tracing/std",
     "miniz_oxide?/std",
     "thiserror?/std",
     "op-alloy-consensus/std",

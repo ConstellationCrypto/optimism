@@ -122,8 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e56cae3909bcb2347f77c0f318ef5eb7e131ea6d0a94d31f8bfb6e4c5e3c7c7"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -150,8 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4394690a8a64757316c57c57f2c663bf8395febb4c4baa049a058ebd122b668"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -241,8 +239,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b97433ffdb356d11b6c89b08c69a787b9f55d787cdeee733c12fdf85d465ef1"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -289,8 +286,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6173ced325833e40ccb781bb372c720df638a966bad6ed6733682b6bff63d855"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -330,8 +326,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae95062f48461967424eecb1e1ab703e493b6a7aca7f9c327cc1c06758eb6ec2"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -345,8 +340,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "464d9c2c5bca3ff3f020f2ab502629043486a1b3645c5c11613c1dade4eb6f5e"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -371,8 +365,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2158d382ef9743ae7185c9fcd33cd9a99967419fdcd5eebc83ff7c0e79cad2bc"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -445,8 +438,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09b08405e82effb4985f7cbe83d5067730e79893c8699793c1e113043ffeac9d"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -490,8 +482,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f39b713fb8fd7abb6ee7601d467f71d2c2541b7799dd02d3a8f9f650d1d3f6d"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -534,8 +525,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96846729dd095dd5a87bf5bd8efea2345ca41ceab6dda212c49f5c8ca6e2a536"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -560,8 +550,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f20059ff046049aae59f6e19d96462214ad3290cf9920394309dd7ffc284390"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-debug",
@@ -598,8 +587,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b71da7e5cdd0d5ffebc459f5987888fd3380969c2f94f8cb652ad91ae51bba"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -609,8 +597,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a3569433bc2cddd4f00b1dd533a38a07512b55e62d11f662fde20930b613b57"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -629,8 +616,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d9d9a32059dff4809fe4db016db13ba1a20babf767c4cd26e97c93ee9efe4c"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -641,8 +627,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f083328dbf7aa5abfe5c0a7758ec9acc86a45bfbcfb45c54186c6caa78036f2a"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -662,8 +647,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1641df7ef4d15cd43843d399252c90a95abf465a67e2a2b2fd76f4e93cc60e15"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -699,8 +683,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b00e2d5ab1f7310c7ecd69962af8c99d2557335ff8cf1baf39c8ff6eec9c171d"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -725,8 +708,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1c2c0b5f024814f1c04ae76ff71862d06c836e7d67102daf8a557e5056be68"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -737,8 +719,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0f59de30d9d3b13ce6a1b90e85270dc086e4e4733aaa12b250fb30e1eb35849"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -752,8 +733,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e64733ea58cfb393c901047638e9ff6890c0a45dc5855bfa077f8bace0f9f9"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -841,8 +821,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec9c680a7ee0879aa27ea2e347f14e3a973a262e4325964fa1ab062b8a796064"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-json-rpc",
  "auto_impl",
@@ -864,8 +843,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae9abaedb9123ebe4b1527bc88a0409d65b2727c3de89a289284ba91ad70ae99"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-json-rpc",
  "alloy-rpc-types-engine",
@@ -886,8 +864,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c74911eda4fd7ef12f446b1661f11787f9fb31bde4ab4a0a68efcac9b98cfdf"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -906,8 +883,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "130762ef3e6c0fb7dc1b855d4f359eb8ea6f2df2f800f40aa52d27737bf640f1"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -945,8 +921,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "1.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a3684226a2220bb6e84a5ab74877e66628882336ecfba97482c9d473aa2b1cc"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -3278,7 +3253,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3580,7 +3555,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4783,7 +4758,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5196,7 +5171,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7516,7 +7491,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8818,7 +8793,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8856,9 +8831,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11123,6 +11098,7 @@ dependencies = [
  "serde_json",
  "tar-no-std",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -13174,7 +13150,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13254,7 +13230,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14179,7 +14155,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14919,7 +14895,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5f7c95348f20c1c913d72157b3c6dee6ea3e30b3d19502c5a7f6d3f160dacbf"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -15503,7 +15479,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -16334,3 +16310,33 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "alloy-contract"
+version = "1.8.2"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
+
+[[patch.unused]]
+name = "alloy-node-bindings"
+version = "1.8.2"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
+
+[[patch.unused]]
+name = "alloy-rpc-types-admin"
+version = "1.8.2"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
+
+[[patch.unused]]
+name = "alloy-rpc-types-anvil"
+version = "1.8.2"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
+
+[[patch.unused]]
+name = "alloy-rpc-types-mev"
+version = "1.8.2"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
+
+[[patch.unused]]
+name = "alloy-rpc-types-txpool"
+version = "1.8.2"
+source = "git+https://github.com/ConstellationCrypto/alloy?branch=inomurko%2F1.8.2-fix#f3946da7aa459bc42eecbac2c0a46450ee0e32cb"
