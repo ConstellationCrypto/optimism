@@ -86,8 +86,11 @@ where
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
 ///
-/// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
-/// instead of computing them from the receipts.
+/// `receipt_root_bloom` is accepted for API compatibility with upstream consensus hooks but is
+/// **ignored** for receipt checks: parallel execution may supply a root from the generic Ethereum
+/// receipts trie, which incorrectly includes Regolith `deposit_nonce` in deposit leaves. OP Stack
+/// headers use op-geth `Receipts.EncodeIndex` rules; we always recompute via
+/// [`verify_receipts_optimism`] from `result.receipts`.
 pub fn validate_block_post_execution<R: DepositReceipt>(
     header: impl BlockHeader,
     chain_spec: impl OpHardforks,
@@ -115,24 +118,29 @@ pub fn validate_block_post_execution<R: DepositReceipt>(
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
     if chain_spec.is_byzantium_active_at_block(header.number()) {
-        let result = if let Some((receipts_root, logs_bloom)) = receipt_root_bloom {
-            compare_receipts_root_and_logs_bloom(
-                receipts_root,
-                logs_bloom,
-                header.receipts_root(),
-                header.logs_bloom(),
-            )
-        } else {
-            verify_receipts_optimism(
-                header.receipts_root(),
-                header.logs_bloom(),
-                receipts,
-                chain_spec,
-                header.timestamp(),
-            )
-        };
-
-        if let Err(error) = result {
+        match receipt_root_bloom.as_ref() {
+            Some((precomputed_root, _precomputed_bloom)) => {
+                // Parallel execution (e.g. StateRootTask) may pass this; we still recompute below
+                // using OP trie rules (see module docs).
+                tracing::info!(
+                    block_number = header.number(),
+                    precomputed_receipts_root = %precomputed_root,
+                    receipt_count = receipts.len(),
+                    "blablabla: validate_block_post_execution received receipt_root_bloom, recomputing OP receipts root from execution receipts"
+                );
+            }
+            None => {
+                tracing::info!(
+                    block_number = header.number(),
+                    header_receipts_root = %header.receipts_root(),
+                    receipt_count = receipts.len(),
+                    "blablabla: validate_block_post_execution verifying optimism receipts root (no precomputed receipt_root_bloom)"
+                );
+            }
+        }
+        if let Err(error) =
+            verify_receipts_optimism(header.receipts_root(), header.logs_bloom(), receipts)
+        {
             let receipts = receipts
                 .iter()
                 .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
@@ -160,13 +168,14 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
     receipts: &[R],
-    chain_spec: impl OpHardforks,
-    timestamp: u64,
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
     let receipts_with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
-    let receipts_root =
-        calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
+    tracing::info!(
+        receipt_count = receipts_with_bloom.len(),
+        "blablabla232211: verify_receipts_optimism computing root via calculate_receipt_root_optimism"
+    );
+    let receipts_root = calculate_receipt_root_optimism(&receipts_with_bloom);
 
     // Calculate header logs bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
@@ -207,10 +216,10 @@ fn compare_receipts_root_and_logs_bloom(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, Receipt};
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{Bytes, U256, b256, hex};
-    use op_alloy_consensus::OpTxEnvelope;
+    use alloy_primitives::{Bloom, Bytes, U256, b256, hex};
+    use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope};
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec, ForkCondition, Hardfork};
     use reth_optimism_chainspec::{BASE_SEPOLIA, OpChainSpec};
     use reth_optimism_forks::{BASE_SEPOLIA_HARDFORKS, OpHardfork};
@@ -584,5 +593,34 @@ mod tests {
             ConsensusError::BlobGasUsedDiff(diff)
                 if diff.got == BLOB_GAS_USED && diff.expected == BLOB_GAS_USED + 1
         ));
+    }
+
+    /// End-to-end: `validate_block_post_execution` → `verify_receipts_optimism` →
+    /// `calculate_receipt_root_optimism` for Manta Sepolia block 863731 (Regolith deposit, pre-Canyon).
+    #[test]
+    fn validate_post_execution_matches_manta_sepolia_863731_header_receipts_root() {
+        let chainspec = BASE_SEPOLIA.clone();
+        let header = Header {
+            number: 863_731,
+            timestamp: 1,
+            gas_used: 0xf9f5,
+            receipts_root: b256!(
+                "0x3c715dd96d2597ccd46fde046da5e4b13e0a5b7d0a2ff60c3ee6c92fee9600ea"
+            ),
+            logs_bloom: Bloom::ZERO,
+            ..Default::default()
+        };
+        let receipts = vec![OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 0xf9f5, logs: vec![] },
+            deposit_nonce: Some(0xd2df2),
+            deposit_receipt_version: None,
+        })];
+        let result = BlockExecutionResult {
+            blob_gas_used: 0,
+            receipts,
+            requests: Requests::default(),
+            gas_used: 0xf9f5,
+        };
+        validate_block_post_execution(&header, chainspec.as_ref(), &result, None).unwrap();
     }
 }

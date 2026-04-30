@@ -5,73 +5,70 @@ use alloy_consensus::ReceiptWithBloom;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
-use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
+
+/// Whether a receipt must be cloned and normalized before computing the receipts trie root.
+///
+/// This mirrors op-geth `core/types/receipt.go` (`Receipts.EncodeIndex`) and Nethermind
+/// `OptimismReceiptMessageDecoder` / `OptimismReceiptTrieDecoder`: for deposit receipts,
+/// `deposit_nonce` is included in the trie value only when `deposit_receipt_version` is set
+/// (post-Canyon). When the version is unset, the trie uses the same RLP shape as a non-deposit
+/// typed receipt (status, cumulative gas, bloom, logs) and omits the nonce—even if it is
+/// present on the in-memory receipt after Regolith.
+fn deposit_receipt_needs_trie_normalization<R: DepositReceipt>(receipt: &R) -> bool {
+    receipt.as_deposit_receipt().is_some_and(|d| {
+        d.deposit_nonce.is_some() && d.deposit_receipt_version.is_none()
+    })
+}
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     receipts: &[ReceiptWithBloom<&R>],
-    chain_spec: impl OpHardforks,
-    timestamp: u64,
 ) -> B256 {
-    // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
-    // the receipt root calculation does not include the deposit nonce in the receipt
-    // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
-    // receipts before calculating the receipt root. This was corrected in the Canyon
-    // hardfork.
-    if chain_spec.is_regolith_active_at_timestamp(timestamp) &&
-        !chain_spec.is_canyon_active_at_timestamp(timestamp)
-    {
-        let receipts = receipts
-            .iter()
-            .map(|receipt| {
-                let mut receipt = receipt.clone().map_receipt(|r| r.clone());
-                if let Some(receipt) = receipt.receipt.as_deposit_receipt_mut() {
-                    receipt.deposit_nonce = None;
-                }
-                receipt
-            })
-            .collect::<Vec<_>>();
-
-        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| r.encode_2718(buf));
+    if !receipts.iter().any(|r| deposit_receipt_needs_trie_normalization(r.receipt)) {
+        return ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_2718(buf));
     }
 
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_2718(buf))
+    let receipts: Vec<ReceiptWithBloom<R>> = receipts
+        .iter()
+        .map(|receipt| {
+            let mut receipt = receipt.clone().map_receipt(|r| r.clone());
+            if let Some(deposit) = receipt.receipt.as_deposit_receipt_mut() {
+                if deposit.deposit_receipt_version.is_none() {
+                    deposit.deposit_nonce = None;
+                }
+            }
+            receipt
+        })
+        .collect();
+
+    ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| r.encode_2718(buf))
 }
 
 /// Calculates the receipt root for a header for the reference type of an OP receipt.
 ///
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
-pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
-    receipts: &[R],
-    chain_spec: impl OpHardforks,
-    timestamp: u64,
-) -> B256 {
-    // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
-    // the receipt root calculation does not include the deposit nonce in the receipt
-    // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
-    // receipts before calculating the receipt root. This was corrected in the Canyon
-    // hardfork.
-    if chain_spec.is_regolith_active_at_timestamp(timestamp) &&
-        !chain_spec.is_canyon_active_at_timestamp(timestamp)
-    {
-        let receipts = receipts
-            .iter()
-            .map(|r| {
-                let mut r = (*r).clone();
-                if let Some(receipt) = r.as_deposit_receipt_mut() {
-                    receipt.deposit_nonce = None;
-                }
-                r
-            })
-            .collect::<Vec<_>>();
-
-        return ordered_trie_root_with_encoder(&receipts, |r, buf| {
+pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(receipts: &[R]) -> B256 {
+    if !receipts.iter().any(deposit_receipt_needs_trie_normalization) {
+        return ordered_trie_root_with_encoder(receipts, |r, buf| {
             r.with_bloom_ref().encode_2718(buf);
         });
     }
 
-    ordered_trie_root_with_encoder(receipts, |r, buf| {
+    let receipts: Vec<R> = receipts
+        .iter()
+        .map(|r| {
+            let mut r = (*r).clone();
+            if let Some(deposit) = r.as_deposit_receipt_mut() {
+                if deposit.deposit_receipt_version.is_none() {
+                    deposit.deposit_nonce = None;
+                }
+            }
+            r
+        })
+        .collect();
+
+    ordered_trie_root_with_encoder(&receipts, |r, buf| {
         r.with_bloom_ref().encode_2718(buf);
     })
 }
@@ -82,42 +79,19 @@ mod tests {
     use alloy_consensus::{Receipt, ReceiptWithBloom, TxReceipt};
     use alloy_primitives::{Address, Bytes, Log, LogData, b256, bloom, hex};
     use op_alloy_consensus::OpDepositReceipt;
-    use reth_optimism_chainspec::BASE_SEPOLIA;
     use reth_optimism_primitives::OpReceipt;
 
-    /// Tests that the receipt root is computed correctly for the regolith block.
-    /// This was implemented due to a minor bug in op-geth and op-erigon where in
-    /// the Regolith hardfork, the receipt root calculation does not include the
-    /// deposit nonce in the receipt encoding.
-    /// To fix this an op-reth patch was applied to the receipt root calculation
-    /// to strip the deposit nonce from each receipt before calculating the root.
+    /// Regression test for OP Stack receipts trie hashing (op-geth `Receipts.EncodeIndex`).
+    ///
+    /// When `deposit_receipt_version` is unset, the trie omits `deposit_nonce` even if it is
+    /// populated on the receipt. See [`canyon_deposit_includes_nonce_in_trie`] for post-Canyon
+    /// behavior.
     #[test]
     fn check_optimism_receipt_root() {
-        let cases = [
-            // Deposit nonces didn't exist in Bedrock; No need to strip. For the purposes of this
-            // test, we do have them, so we should get the same root as Canyon.
-            (
-                "bedrock",
-                1679079599,
-                b256!("0xe255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
-            ),
-            // Deposit nonces introduced in Regolith. They weren't included in the receipt RLP,
-            // so we need to strip them - the receipt root will differ.
-            (
-                "regolith",
-                1679079600,
-                b256!("0xe255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
-            ),
-            // Receipt root hashing bug fixed in Canyon. Back to including the deposit nonce
-            // in the receipt RLP when computing the receipt root.
-            (
-                "canyon",
-                1699981200,
-                b256!("0x6eefbb5efb95235476654a8bfbf8cb64a4f5f0b0c80b700b0c5964550beee6d7"),
-            ),
-        ];
+        let expected_root =
+            b256!("0xe255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb");
 
-        for case in cases {
+        for name in ["bedrock_compat", "regolith"] {
             let receipts = [
                 // 0xb0d6ee650637911394396d81172bd1c637d568ed1fbddab0daddfca399c58b53
                 OpReceipt::Deposit(OpDepositReceipt {
@@ -464,11 +438,41 @@ mod tests {
             ];
             let root = calculate_receipt_root_optimism(
                 &receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>(),
-                BASE_SEPOLIA.as_ref(),
-                case.1,
             );
-            assert_eq!(root, case.2);
+            assert_eq!(root, expected_root, "{name}");
         }
+    }
+
+    /// Post-Canyon deposit receipts set `deposit_receipt_version` and then include `deposit_nonce`
+    /// in the trie (op-geth `EncodeIndex` uses full `depositReceiptRLP`).
+    #[test]
+    fn canyon_deposit_includes_nonce_in_trie() {
+        let inner = Receipt {
+            status: true.into(),
+            cumulative_gas_used: 46913,
+            logs: vec![],
+        };
+        let with_nonce_no_version = OpReceipt::Deposit(OpDepositReceipt {
+            inner: inner.clone(),
+            deposit_nonce: Some(4012991u64),
+            deposit_receipt_version: None,
+        });
+        let with_nonce_stripped = OpReceipt::Deposit(OpDepositReceipt {
+            inner: inner.clone(),
+            deposit_nonce: None,
+            deposit_receipt_version: None,
+        });
+        let post_canyon = OpReceipt::Deposit(OpDepositReceipt {
+            inner,
+            deposit_nonce: Some(4012991u64),
+            deposit_receipt_version: Some(1),
+        });
+
+        let root_stripped = calculate_receipt_root_no_memo_optimism(&[with_nonce_no_version]);
+        assert_eq!(root_stripped, calculate_receipt_root_no_memo_optimism(&[with_nonce_stripped]));
+
+        let root_canyon = calculate_receipt_root_no_memo_optimism(&[post_canyon]);
+        assert_ne!(root_canyon, root_stripped);
     }
 
     #[test]
@@ -484,10 +488,166 @@ mod tests {
             OpReceipt::Eip2930(Receipt { status: true.into(), cumulative_gas_used: 102068, logs });
         let receipt = ReceiptWithBloom { receipt: &inner, logs_bloom };
         let receipt = vec![receipt];
-        let root = calculate_receipt_root_optimism(&receipt, BASE_SEPOLIA.as_ref(), 0);
+        tracing::info!("blablabla2322");
+        let root = calculate_receipt_root_optimism(&receipt);
         assert_eq!(
             root,
             b256!("0xfe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0")
+        );
+    }
+
+    /// Manta Sepolia block 863731: single Regolith deposit (`depositNonce` set, no
+    /// `depositReceiptVersion`). Header `receiptsRoot` from a live RPC; trie encoding must match
+    /// op-geth `Receipts.EncodeIndex` (nonce omitted) not `Receipt.MarshalBinary` (nonce present).
+    ///
+    /// Reproduces the pre-fix op-reth failure: computed root `0x49f9…` vs header `0x3c71…`.
+    #[test]
+    fn manta_sepolia_863731_regolith_deposit_receipt_root_matches_chain_header() {
+        let deposit = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 0xf9f5, logs: vec![] },
+            deposit_nonce: Some(0xd2df2),
+            deposit_receipt_version: None,
+        });
+        let root = calculate_receipt_root_no_memo_optimism(std::slice::from_ref(&deposit));
+        assert_eq!(
+            root,
+            b256!("0x3c715dd96d2597ccd46fde046da5e4b13e0a5b7d0a2ff60c3ee6c92fee9600ea")
+        );
+    }
+
+    /// Manta Sepolia block 549192 (another single Regolith deposit-only block; vectors from RPC).
+    ///
+    /// Pre-fix op-reth logged: got `0xac185bb4402e70ccef2c1188aea24fa4055a0334ffa0f703b6b0d50881c20da5`,
+    /// expected header `0xdbf9def3e8d930433596aa91b3ad3279652031ca45b1a3ca92785703f84aa6b0`.
+    #[test]
+    fn manta_sepolia_549192_regolith_deposit_receipt_root_matches_chain_header() {
+        let deposit = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 0xccfd, logs: vec![] },
+            deposit_nonce: Some(0x86147),
+            deposit_receipt_version: None,
+        });
+        let root = calculate_receipt_root_no_memo_optimism(std::slice::from_ref(&deposit));
+        assert_eq!(
+            root,
+            b256!("0xdbf9def3e8d930433596aa91b3ad3279652031ca45b1a3ca92785703f84aa6b0")
+        );
+    }
+
+    /// Trie built from raw `encode_2718` (nonce included) for block 549192 matches the faulty
+    /// `got` root from pre-fix nodes.
+    #[test]
+    fn regolith_deposit_549192_wrong_root_if_nonce_encoded_in_trie_value() {
+        let deposit = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 0xccfd, logs: vec![] },
+            deposit_nonce: Some(0x86147),
+            deposit_receipt_version: None,
+        });
+        let correct = calculate_receipt_root_no_memo_optimism(std::slice::from_ref(&deposit));
+        let wrong = ordered_trie_root_with_encoder(
+            std::slice::from_ref(&deposit),
+            |r, buf| r.with_bloom_ref().encode_2718(buf),
+        );
+        assert_ne!(wrong, correct);
+        assert_eq!(
+            wrong,
+            b256!("0xac185bb4402e70ccef2c1188aea24fa4055a0334ffa0f703b6b0d50881c20da5")
+        );
+    }
+
+    /// Manta Sepolia block 697672 (StateRootTask / `receipt_root_bloom` path exposed wrong trie).
+    #[test]
+    fn manta_sepolia_697672_regolith_deposit_receipt_root_matches_chain_header() {
+        let deposit = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 0xc545, logs: vec![] },
+            deposit_nonce: Some(0xaa547),
+            deposit_receipt_version: None,
+        });
+        let root = calculate_receipt_root_no_memo_optimism(std::slice::from_ref(&deposit));
+        assert_eq!(
+            root,
+            b256!("0x0e7c255df3e2b7ca4d55b82047531f7f3e7437ab1eb33e22eca70653c874982d")
+        );
+    }
+
+    #[test]
+    fn regolith_deposit_697672_wrong_root_matches_precomputed_ethereum_trie_got() {
+        let deposit = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 0xc545, logs: vec![] },
+            deposit_nonce: Some(0xaa547),
+            deposit_receipt_version: None,
+        });
+        let correct = calculate_receipt_root_no_memo_optimism(std::slice::from_ref(&deposit));
+        let wrong = ordered_trie_root_with_encoder(
+            std::slice::from_ref(&deposit),
+            |r, buf| r.with_bloom_ref().encode_2718(buf),
+        );
+        assert_ne!(wrong, correct);
+        assert_eq!(
+            wrong,
+            b256!("0xe0afede48ad81b1163eaa1f659972d7eefa65a5be63e6a98a534516b390fbb79")
+        );
+    }
+
+    /// Including `deposit_nonce` in the typed RLP payload (MarshalBinary-style) must not match the
+    /// canonical receipts trie for pre-Canyon deposit receipts.
+    #[test]
+    fn regolith_deposit_wrong_root_if_nonce_encoded_in_trie_value() {
+        let deposit = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt { status: true.into(), cumulative_gas_used: 0xf9f5, logs: vec![] },
+            deposit_nonce: Some(0xd2df2),
+            deposit_receipt_version: None,
+        });
+        let correct = calculate_receipt_root_no_memo_optimism(std::slice::from_ref(&deposit));
+        let wrong = ordered_trie_root_with_encoder(
+            std::slice::from_ref(&deposit),
+            |r, buf| r.with_bloom_ref().encode_2718(buf),
+        );
+        assert_ne!(wrong, correct);
+        assert_eq!(
+            wrong,
+            b256!("0x49f9ab1e7322d0075c5783ee199ece50eb2e25291a680476bdf5043a0c6e68bd")
+        );
+    }
+
+    /// Manta Sepolia block 836765: Regolith deposit + EIP-1559 user tx. Verifies normalization
+    /// interacts correctly when only the first receipt is a deposit.
+    ///
+    /// Reproduces the pre-fix failure: got `0xa43c…` vs header `0x11e4…`.
+    #[test]
+    fn manta_sepolia_836765_mixed_deposit_and_eip1559_receipt_root_matches_chain_header() {
+        let transfer_log = Log {
+            address: hex!("9c76c6304885661cdb97f3984b13114b6d4b5248").into(),
+            data: LogData::new_unchecked(
+                vec![
+                    b256!("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+                    b256!("0x00000000000000000000000070ce2d9bb8502e302b9cbe5c56a5d0f1067da713"),
+                    b256!("0x000000000000000000000000717c7f9822e8c2ae6a64773f7a92727755a7e2fc"),
+                ],
+                Bytes::from_static(&hex!(
+                    "00000000000000000000000000000000000000000000003635c9adc5dea00000"
+                )),
+            ),
+        };
+        let receipts = [
+            OpReceipt::Deposit(OpDepositReceipt {
+                inner: Receipt {
+                    status: true.into(),
+                    cumulative_gas_used: 0xccfd,
+                    logs: vec![],
+                },
+                deposit_nonce: Some(0xcc49c),
+                deposit_receipt_version: None,
+            }),
+            OpReceipt::Eip1559(Receipt {
+                status: true.into(),
+                cumulative_gas_used: 0x18336,
+                logs: vec![transfer_log],
+            }),
+        ];
+        let root = calculate_receipt_root_no_memo_optimism(&receipts);
+        assert_eq!(
+            root,
+            b256!("0x11e432ab48d8ffcb3278758a25fb2e10ba1267feae336da97a0f7bc861c74bbe")
         );
     }
 }
