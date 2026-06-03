@@ -67,3 +67,42 @@ func TestBatchMux_ActiveHolocene(t *testing.T) {
 
 	require.Panics(t, func() { b.Transform(forks.Holocene) })
 }
+
+type stubBatchMuxL2 struct {
+	safe eth.L2BlockRef
+}
+
+func (s *stubBatchMuxL2) L2BlockRefByNumber(context.Context, uint64) (eth.L2BlockRef, error) {
+	panic("not implemented")
+}
+
+func (s *stubBatchMuxL2) PayloadByNumber(context.Context, uint64) (*eth.ExecutionPayloadEnvelope, error) {
+	panic("not implemented")
+}
+
+func (s *stubBatchMuxL2) L2BlockRefByLabel(_ context.Context, label eth.BlockLabel) (eth.L2BlockRef, error) {
+	if label == eth.Safe {
+		return s.safe, nil
+	}
+	return eth.L2BlockRef{}, io.EOF
+}
+
+func TestBatchMux_HoloceneBoundarySafeHead(t *testing.T) {
+	log := testlog.Logger(t, log.LevelTrace)
+	ctx := context.Background()
+	holoceneTime := uint64(1780493076)
+	l1PreHolocene := eth.L1BlockRef{Time: holoceneTime - 100, Hash: common.Hash{0xaa}}
+	cfg := &rollup.Config{
+		HoloceneTime: &holoceneTime,
+		BlockTime:    1,
+	}
+	l2 := &stubBatchMuxL2{
+		safe: eth.L2BlockRef{Time: holoceneTime - 1},
+	}
+	prev := &fakeBatchQueueInput{origin: l1PreHolocene}
+	b := NewBatchMux(log, cfg, prev, l2)
+
+	err := b.Reset(ctx, l1PreHolocene, eth.SystemConfig{})
+	require.Equal(t, io.EOF, err)
+	require.IsType(t, new(BatchStage), b.SingularBatchProvider)
+}

@@ -134,7 +134,7 @@ func (bq *BatchQueue) AddBatch(ctx context.Context, batch Batch, parent eth.L2Bl
 		Batch:            batch,
 	}
 	validity := CheckBatch(ctx, bq.config, bq.log, bq.l1Blocks, parent, &data, bq.l2)
-	if validity == BatchDrop {
+	if validity == BatchDrop || validity == BatchPast {
 		return // if we do drop the batch, CheckBatch will log the drop reason with WARN level.
 	}
 	batch.LogContext(bq.log).Debug("Adding batch")
@@ -174,7 +174,7 @@ batchLoop:
 		case BatchFuture:
 			remaining = append(remaining, batch)
 			continue
-		case BatchDrop:
+		case BatchDrop, BatchPast:
 			batch.Batch.LogContext(bq.log).Warn("Dropping batch",
 				"parent", parent.ID(),
 				"parent_time", parent.Time,
