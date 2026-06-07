@@ -463,20 +463,28 @@ func isJovianButNotFirstBlock(rollupCfg *rollup.Config, l2Timestamp uint64) bool
 	return rollupCfg.IsJovian(l2Timestamp) && !rollupCfg.IsJovianActivationBlock(l2Timestamp)
 }
 
-// L1BlockInfoFromBytes is the inverse of L1InfoDeposit, to see where the L2 chain is derived from
+// L1BlockInfoFromBytes is the inverse of L1InfoDeposit, to see where the L2 chain is derived from.
+// The calldata format is determined from the function selector and length, not the rollup fork
+// schedule, so blocks produced under a different fork configuration remain readable.
 func L1BlockInfoFromBytes(rollupCfg *rollup.Config, l2BlockTime uint64, data []byte) (*L1BlockInfo, error) {
+	_ = rollupCfg
+	_ = l2BlockTime
+	if len(data) < 4 {
+		return nil, fmt.Errorf("data is too short: %d", len(data))
+	}
 	var info L1BlockInfo
-	// Important, this must be ordered from most recent to oldest
-	if isJovianButNotFirstBlock(rollupCfg, l2BlockTime) {
+	switch {
+	case bytes.Equal(data[:4], L1InfoFuncJovianBytes4):
 		return &info, info.unmarshalBinaryJovian(data)
-	}
-	if isIsthmusButNotFirstBlock(rollupCfg, l2BlockTime) {
+	case bytes.Equal(data[:4], L1InfoFuncIsthmusBytes4):
 		return &info, info.unmarshalBinaryIsthmus(data)
-	}
-	if isEcotoneButNotFirstBlock(rollupCfg, l2BlockTime) {
+	case bytes.Equal(data[:4], L1InfoFuncEcotoneBytes4):
 		return &info, info.unmarshalBinaryEcotone(data)
+	case bytes.Equal(data[:4], L1InfoFuncBedrockBytes4):
+		return &info, info.unmarshalBinaryBedrock(data)
+	default:
+		return nil, fmt.Errorf("unrecognized L1 info format selector: %x", data[:4])
 	}
-	return &info, info.unmarshalBinaryBedrock(data)
 }
 
 // L1InfoDeposit creates a L1 Info deposit transaction based on the L1 block,
@@ -494,9 +502,13 @@ func L1InfoDeposit(rollupCfg *rollup.Config, l1ChainConfig *params.ChainConfig, 
 	isEcotoneActivated := isEcotoneButNotFirstBlock(rollupCfg, l2Timestamp)
 	isIsthmusActivated := isIsthmusButNotFirstBlock(rollupCfg, l2Timestamp)
 	isJovianActivated := isJovianButNotFirstBlock(rollupCfg, l2Timestamp)
+	// On the Jovian activation block setL1BlockValuesIsthmus() must be used, even when Isthmus
+	// activates in the same block. See https://specs.optimism.io/protocol/jovian/l1-attributes.html
+	isJovianActivationBlock := rollupCfg.IsJovianActivationBlock(l2Timestamp)
+	useIsthmusFormat := isIsthmusActivated || isJovianActivationBlock
 
 	// 1. Set all fields according to active forks
-	if isEcotoneActivated {
+	if isEcotoneActivated || useIsthmusFormat || isJovianActivated {
 		l1BlockInfo.BlobBaseFee = block.BlobBaseFee(l1ChainConfig)
 
 		// Apply Cancun blob base fee calculation if this chain needs the L1 Pectra
@@ -525,7 +537,7 @@ func L1InfoDeposit(rollupCfg *rollup.Config, l1ChainConfig *params.ChainConfig, 
 		l1BlockInfo.L1FeeOverhead = sysCfg.Overhead
 		l1BlockInfo.L1FeeScalar = sysCfg.Scalar
 	}
-	if isIsthmusActivated {
+	if useIsthmusFormat {
 		operatorFee := sysCfg.OperatorFee()
 		l1BlockInfo.OperatorFeeScalar = operatorFee.Scalar
 		l1BlockInfo.OperatorFeeConstant = operatorFee.Constant
@@ -544,7 +556,7 @@ func L1InfoDeposit(rollupCfg *rollup.Config, l1ChainConfig *params.ChainConfig, 
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal Jovian l1 block info: %w", err)
 		}
-	case isIsthmusActivated:
+	case useIsthmusFormat:
 		data, err = l1BlockInfo.marshalBinaryIsthmus()
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal Isthmus l1 block info: %w", err)

@@ -107,7 +107,7 @@ func TestParseL1InfoDepositTxData(t *testing.T) {
 		_, err = crand.Read(depTx.Data[0:4])
 		require.NoError(t, err)
 		_, err = L1BlockInfoFromBytes(&rollupCfg, info.Time(), depTx.Data)
-		require.ErrorContains(t, err, "function signature")
+		require.ErrorContains(t, err, "unrecognized L1 info format selector")
 	})
 	t.Run("regolith", func(t *testing.T) {
 		rng := rand.New(rand.NewSource(1234))
@@ -218,7 +218,7 @@ func TestParseL1InfoDepositTxData(t *testing.T) {
 		rollupCfg := rollup.Config{BlockTime: 2, Genesis: rollup.Genesis{L2Time: 1000}}
 		rollupCfg.ActivateAtGenesis(forks.Isthmus)
 		jovianTime := rollupCfg.Genesis.L2Time + rollupCfg.BlockTime // activate jovian just after genesis
-		rollupCfg.InteropTime = &jovianTime
+		rollupCfg.JovianTime = &jovianTime
 		depTx, err := L1InfoDeposit(&rollupCfg, params.MergedTestChainConfig, randomL1Cfg(rng, info), randomSeqNr(rng), info, jovianTime)
 		require.NoError(t, err)
 		require.False(t, depTx.IsSystemTransaction)
@@ -226,6 +226,36 @@ func TestParseL1InfoDepositTxData(t *testing.T) {
 		// Jovian activates, but Isthmus L1 info is still used at this upgrade block
 		require.Equal(t, L1InfoIsthmusLen, len(depTx.Data))
 		require.Equal(t, L1InfoFuncIsthmusBytes4, depTx.Data[:4])
+	})
+	t.Run("activation-block jovian with isthmus", func(t *testing.T) {
+		rng := rand.New(rand.NewSource(1234))
+		info := testutils.MakeBlockInfo(nil)(rng)
+		rollupCfg := rollup.Config{BlockTime: 2, Genesis: rollup.Genesis{L2Time: 1000}}
+		rollupCfg.ActivateAtGenesis(forks.Ecotone)
+		forkTime := rollupCfg.Genesis.L2Time + rollupCfg.BlockTime
+		rollupCfg.IsthmusTime = &forkTime
+		rollupCfg.JovianTime = &forkTime
+		depTx, err := L1InfoDeposit(&rollupCfg, params.MergedTestChainConfig, randomL1Cfg(rng, info), randomSeqNr(rng), info, forkTime)
+		require.NoError(t, err)
+		require.Equal(t, L1InfoIsthmusLen, len(depTx.Data))
+		require.Equal(t, L1InfoFuncIsthmusBytes4, depTx.Data[:4])
+	})
+	t.Run("parse ecotone format with jovian fork config", func(t *testing.T) {
+		rng := rand.New(rand.NewSource(1234))
+		info := testutils.MakeBlockInfo(nil)(rng)
+		rollupCfg := rollup.Config{BlockTime: 2, Genesis: rollup.Genesis{L2Time: 1000}}
+		rollupCfg.ActivateAtGenesis(forks.Ecotone)
+		timestamp := rollupCfg.Genesis.L2Time + rollupCfg.BlockTime
+		depTx, err := L1InfoDeposit(&rollupCfg, params.MergedTestChainConfig, randomL1Cfg(rng, info), randomSeqNr(rng), info, timestamp)
+		require.NoError(t, err)
+		require.Equal(t, L1InfoEcotoneLen, len(depTx.Data))
+
+		jovianCfg := rollupCfg
+		jovianTime := timestamp
+		jovianCfg.IsthmusTime = &jovianTime
+		jovianCfg.JovianTime = &jovianTime
+		_, err = L1BlockInfoFromBytes(&jovianCfg, timestamp, depTx.Data)
+		require.NoError(t, err, "must parse on-chain format regardless of fork schedule")
 	})
 	t.Run("genesis-block jovian", func(t *testing.T) {
 		rng := rand.New(rand.NewSource(1234))
